@@ -182,7 +182,7 @@ export function TerrainPark() {
             <Stage kind="skier" />
             <div className="row copy"><div><span className="tag bad">Skiers</span><p>From line 3, skiers join the groms. Your board is already equipped — it changes lip, grind, and pop.</p></div></div>
             <h2>Stars</h2>
-            <div className="row copy"><div><span className="tag">Tricks</span><p>Hold to spin frontside/backside. Swipe in the air for grabs (Indy, Melon, Mute, Method, Tail, Nose, Stalefish). On rails swipe for 50-50, boardslide, lipslide, nose/tail press. Score is tricks only — no falling stars.</p></div></div>
+            <div className="row copy"><div><span className="tag">Tricks</span><p>Hold to backflip. Tap in the air for spin — second tap is a small boost, later taps add half-turns. Hold and taps can combine. Swipe for grabs (Indy, Melon, Mute, Method, Tail, Nose, Stalefish). On rails swipe for 50-50, boardslide, lipslide, nose/tail press. Score is tricks only — no falling stars.</p></div></div>
             <h2>Board</h2>
             <div className="grid">
               {snap.boards.map((b) => (

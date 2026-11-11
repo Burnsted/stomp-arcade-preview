@@ -1,8 +1,9 @@
 /** Terrain Park — tip build. Park identity, not a dodge corridor. */
 
 import {
-  loadArt, ensureBackdrop, drawAtlasFrame, frameWu, RIDER_FRAMES, WORLD_FRAMES, RIDE_ATLAS_H, RIDE_NATIVE_CSS,
-  BG_W, BG_H,
+  loadArt, ensureBackdrop, drawAtlasFrame, frameWu, RIDER_FRAMES, WORLD_FRAMES, GROM_FRAMES,
+  RIDE_ATLAS_H, RIDE_NATIVE_CSS,
+  BG_W, BG_H, BG_SRC_TOP, BG_SRC_END, BG_SRC_H,
   type ArtKit, type RiderFrameId, type BackdropId,
 } from "./art";
 
@@ -14,8 +15,30 @@ const GRAVITY = 3600;
 const JV = -950;
 const DT = 1 / 120;
 const AIR = (2 * -JV) / GRAVITY;
-/** One full hold across a flat jump lands on exactly one rotation. */
+/** One full hold across a flat jump lands on exactly one rotation (no floaty stretch). */
 const SPIN = (Math.PI * 2) / AIR;
+/** Second tap in air — one small extra lift, once per airtime (not a repeat jump). */
+const AIR_BOOST_FRAC = 0.14;
+/** Max pointer/key down duration to count as a tap (not a hold/flip). */
+const TAP_MS = 150;
+/** Landing window (°): must be within this of a half/full turn on each axis or crash. */
+const SPIN_LAND_WIN_DEG = 30;
+/** Below this absolute rotation on an axis, treat as no-rotation on that axis. */
+const SPIN_NO_DEG = 25;
+/** Each post-boost air tap adds one half-turn (180°) of yaw spin. */
+const TAP_SPIN_HALF = Math.PI;
+/** Scored yaw tiers (degrees) from tap spins. */
+const SPIN_TIERS_DEG = [360, 540, 720, 900, 1080] as const;
+/** Tunable points per completed yaw tier (clean land). */
+const SPIN_PTS: Record<number, number> = {
+  360: 100,
+  540: 150,
+  720: 300,
+  900: 450,
+  1080: 700,
+};
+/** Cap tap-yaw at the top scored tier. */
+const YAW_MAX = (1080 * Math.PI) / 180;
 const LIP_WIN = 0.2;
 const POST_LIP = 0.4;
 const GRIND_FRIC = 0.88;
@@ -69,6 +92,10 @@ type Feat = {
   railTrick?: number; labeled?: number;
   /** Cosmetic snow buildup 0–1 on rails/boxes. */
   snowCap?: number;
+  /** Franz kid pose — sit on decks/runouts; ride crosses flat gaps. */
+  pose?: "sit" | "ride";
+  /** Cleared by jumping over (one-shot bonus). */
+  cleared?: boolean;
 };
 type Part = { x: number; y: number; vx: number; vy: number; l: number; c: string; s: number };
 type Pop = { x: number; y: number; l: number; txt: string };
@@ -133,7 +160,8 @@ const FEAT: Record<string, FeatDef> = {
   box: { w: 160, h: 14, ride: 1, grind: 1, lab: "Box" },
   flat: { w: 0, h: 0, terr: 1, ap: 54, dk: 86, ex: 78, amp: 28, lab: "Flat top" },
   kicker: { w: 0, h: 0, terr: 1, ap: 72, dk: 16, ex: 118, amp: WORLD_FRAMES.kicker.h / 2, lab: "Kicker", kick: 1 },
-  grom: { w: WORLD_FRAMES.skier.w / 2, h: WORLD_FRAMES.skier.h / 2, mob: 1, vx: 46, lab: "Grom" },
+  // Franz Grom 1 — native÷2 (~60 CSS ride ≈ 70% of adult). Sit uses shorter hitbox.
+  grom: { w: GROM_FRAMES.grom_ride.w / 2, h: GROM_FRAMES.grom_ride.h / 2, mob: 1, vx: 30, lab: "Grom" },
   skier: { w: WORLD_FRAMES.skier.w / 2, h: WORLD_FRAMES.skier.h / 2, mob: 1, vx: 72, lab: "Skier" },
 };
 
@@ -242,6 +270,10 @@ type State = {
   done: boolean; flip: number; holding: boolean; lastTap: number; playAt: number; trickProg: number;
   trickDone: boolean; trickFlips: number; trickRamps: number; trickCombos: number; trickGrabs: number; trickRails: number;
   airFrom: string | null;
+  /** Once per airtime: second tap already spent on the small air boost. */
+  airBoostUsed: boolean;
+  /** Tap-yaw spin (radians). Hold backflips stay on `flip`; taps add half-turns here. */
+  yaw: number;
   /** +1 frontside, −1 backside. */
   spinDir: number;
   grab: GrabId;
@@ -292,6 +324,12 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   let LV: Level = LEVELS[0]!;
   let god = false;
   let reduce = false;
+  /** Pointer currently down (may become a hold after TAP_MS). */
+  let pressArmed = false;
+  /** performance.now() of the current press. */
+  let pressAt = 0;
+  /** This press already took off from snow/rail — release must not air-tap. */
+  let pressJumped = false;
   try { reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { /* ignore */ }
 
   let rng = mkRand(1);
@@ -348,7 +386,9 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   /** When set, draw() paints the pose QA sheet instead of the ride (frozen for screenshots). */
   let poseSheetLock = false;
   /** Franz atlases + resort backdrops — null/failed → vector / skip fallback. */
-  let art: ArtKit = { ready: false, rider: null, world: null, bg: {} };
+  let art: ArtKit = { ready: false, rider: null, world: null, grom: null, bg: {}, bgSky: {} };
+  /** At most one Franz grom per gap between park features (from level 2). */
+  let gapHasGrom = false;
   /** Forced backdrop for evidence shots; null = alternate by level. */
   let bgForce: BackdropId | null = null;
   /** Global sprite factor from playfield height (1 = native÷2 CSS = 85px ride). */
@@ -369,16 +409,15 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     return frameWu(frame, atlasDpr(), scale, spriteG);
   }
   /** Soft elliptical contact shadow under a ground prop / rider. */
-  function contactShadow(ax: number, groundY: number, rw: number, rh = 4, a = 0.34) {
+  function contactShadow(ax: number, groundY: number, rw: number, rh = 4, a = 0.22) {
     cx.save();
-    cx.fillStyle = `rgba(18,10,36,${a})`;
+    cx.fillStyle = `rgba(90,120,150,${a})`;
     cx.beginPath();
-    cx.ellipse(ax, groundY + 1.2, Math.max(7, rw), Math.max(2.6, rh), 0, 0, 7);
+    cx.ellipse(ax, groundY + 1.2, Math.max(7, rw), Math.max(2.4, rh), 0, 0, 7);
     cx.fill();
-    // Softer outer falloff
-    cx.fillStyle = `rgba(18,10,36,${a * 0.45})`;
+    cx.fillStyle = `rgba(90,120,150,${a * 0.4})`;
     cx.beginPath();
-    cx.ellipse(ax, groundY + 1.6, Math.max(10, rw * 1.35), Math.max(3.4, rh * 1.4), 0, 0, 7);
+    cx.ellipse(ax, groundY + 1.6, Math.max(10, rw * 1.3), Math.max(3.2, rh * 1.35), 0, 0, 7);
     cx.fill();
     cx.restore();
   }
@@ -563,10 +602,53 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     }
     return true;
   }
+  /**
+   * Sit seats: flat-top deck edges + box decks + flat runouts only.
+   * Never rail, lip, kicker/hit landing, or in the air arc.
+   */
+  function sitSafe(wx: number, w: number, host: Feat | null) {
+    const half = w / 2 + 6;
+    if (host) {
+      const hd = FEAT[host.k];
+      if (hd?.terr && host.k === "flat") {
+        // On / just past the deck edge — still ahead of the landing slope.
+        const left = host.wx - host.dk * 0.15;
+        const right = host.wx + host.dk + Math.min(22, host.ex * 0.12);
+        if (wx + half < left || wx - half > right) return false;
+        return true;
+      }
+      if (hd?.grind && (host.k === "box" || host.k === "log")) {
+        const edge = (host.w || hd.w) * 0.48;
+        return Math.abs(wx - host.wx) <= edge + 8;
+      }
+    }
+    // Standalone sit in a soft runout pocket — keep clear of rails/lips/landings.
+    for (const f of S.feats) {
+      const d = FEAT[f.k];
+      if (!d || d.mob) continue;
+      if (d.grind && f.k === "rail") {
+        const gh = (f.w || 80) / 2 + 40;
+        if (Math.abs(wx - f.wx) < gh + half) return false;
+      }
+      if (d.terr && (f.k === "kicker" || f.k === "hit")) {
+        const z = featAirClear(f);
+        if (z && wx + half > z.left && wx - half < z.right) return false;
+      }
+      if (d.terr && f.k === "flat") {
+        // Keep off the steep approach / deep landing; deck+soft runout OK.
+        const apL = f.wx - f.ap - f.dk - 20;
+        const landR = f.wx + f.dk + f.ex * 0.55;
+        if (wx + half > apL && wx - half < f.wx - f.dk * 0.2) return false;
+        if (wx - half > landR) return false;
+      }
+    }
+    return true;
+  }
 
   function reset(sd: number | null, lv?: Level) {
     if (lv) LV = lv;
     mobI = 0;
+    gapHasGrom = false;
     seed(sd == null ? (LV.endless ? (Date.now() >>> 0) : 2000 + LV.n) : sd);
     const gy0 = GROUND + terr(0);
     const m0 = boardSpd() * levelSpd() * diff().spd;
@@ -589,7 +671,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       land: 0, landBad: 0, hop: 0, climbVy: 0, mode: "ready" as Mode, prevMode: "ready" as Mode, t: 0, dist: 0,
       spd: LV.base * m0, p: { x: 110, y: gy0, vy: 0, on: true }, nextX: 780, shake: 0, done: false, flip: 0,
       holding: false, lastTap: 0, playAt: 0, trickProg: 0, trickDone: false, trickFlips: 0, trickRamps: 0,
-      trickCombos: 0, trickGrabs: 0, trickRails: 0, airFrom: null, spinDir: 1, grab: null,
+      trickCombos: 0, trickGrabs: 0, trickRails: 0, airFrom: null, airBoostUsed: false, yaw: 0, spinDir: 1, grab: null,
       grabEase: 0, grabHeld: false, windup: 0, grindStyle: "fifty" as GrindStyle,
       grindExit: false, heartFlashT: 0, heartGainT: 0, heartAt: 0, lostHeart: -1,
       autoRetry: false, gameOver: false, postLip: 0, lessonPlaced: false, missed: false, achT: 0, achToast: "",
@@ -598,7 +680,8 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     for (let i = 0; i < FLAKE_CAP; i++) {
       S.flakes.push({
         x: Math.random() * 1000, y: Math.random() * VH,
-        r: 1.1 + Math.random() * 2.8, z: Math.random(), vx: (Math.random() - 0.5) * 8,
+        // Soft round dots ≈ 2–4 CSS px once scaled (varied with depth).
+        r: 2.0 + Math.random() * 2.0, z: Math.random(), vx: (Math.random() - 0.5) * 8,
       });
     }
     // Snap steady camera to the new line (no tween from the previous run).
@@ -626,7 +709,18 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       if (lesson && k === "log") f.w = 320;
       if (lesson && k === "box") f.w = 220;
     }
-    if (d.mob) { f.w = d.w; f.h = d.h; f.vx = (d.vx || 50) * (0.85 + rngB() * 0.35); f.ph = rngB() * 6; }
+    if (d.mob) {
+      f.w = d.w; f.h = d.h; f.vx = (d.vx || 50) * (0.85 + rngB() * 0.35); f.ph = rngB() * 6;
+      if (k === "grom") {
+        // Default ride; sit pose overrides size/vx in placeGromInGap.
+        f.pose = "ride";
+        f.cleared = false;
+        f.w = GROM_FRAMES.grom_ride.w / 2;
+        f.h = GROM_FRAMES.grom_ride.h / 2;
+        // Always slower than the player line speed.
+        f.vx = Math.min(36, Math.max(18, (d.vx || 30) * (0.85 + rngB() * 0.3)));
+      }
+    }
     if (d.terr) {
       f.ap = (d.ap || 0) * (0.94 + rngB() * 0.1);
       f.dk = (d.dk || 0) * (0.94 + rngB() * 0.1);
@@ -705,6 +799,59 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     return park[Math.floor(rng() * park.length)]!;
   }
 
+  /** Last non-traffic park feature (host for sit seats / gap rides). */
+  function lastParkFeat(): Feat | null {
+    for (let i = S.feats.length - 1; i >= 0; i--) {
+      const f = S.feats[i]!;
+      if (!FEAT[f.k]?.mob) return f;
+    }
+    return null;
+  }
+
+  /**
+   * Franz Grom 1 — from level 2, ≤1 per gap.
+   * sit = flat runouts / deck edges; ride = flat stretches between features.
+   */
+  function placeGromInGap() {
+    if (LV.n < 2 || gapHasGrom) return;
+    const host = lastParkFeat();
+    const wantSit = !!(host && (host.k === "flat" || host.k === "box") && rng() < 0.62);
+    if (wantSit && host) {
+      const f = mkFeat("grom");
+      f.pose = "sit";
+      f.vx = 0;
+      f.w = GROM_FRAMES.grom_sit.w / 2;
+      f.h = GROM_FRAMES.grom_sit.h / 2;
+      if (host.k === "flat") {
+        // Deck edge → soft runout fringe (not the lip or deep landing).
+        f.wx = Math.round(host.wx + host.dk * (0.55 + rngB() * 0.35));
+      } else {
+        f.wx = Math.round(host.wx + (host.w || 80) * (0.28 + rngB() * 0.2));
+      }
+      if (sitSafe(f.wx, f.w, host)) {
+        S.feats.push(f);
+        census.grom = (census.grom || 0) + 1;
+        gapHasGrom = true;
+        return;
+      }
+      // Fall through to a ride spawn in the same gap if the seat was unsafe.
+    }
+    // Ride — patrol the flat gap ahead of the last feature only.
+    const f = mkFeat("grom");
+    f.pose = "ride";
+    f.w = GROM_FRAMES.grom_ride.w / 2;
+    f.h = GROM_FRAMES.grom_ride.h / 2;
+    f.vx = 20 + rngB() * 14; // always << player base (~268+)
+    const base = host ? host.wx + featSpan(host) * 0.42 + 60 : S.dist + S.nextX;
+    f.wx = Math.round(base + rngB() * 90);
+    let tries = 0;
+    while (!trafficSafe(f.wx, f.w) && tries++ < 16) f.wx += 48;
+    if (!trafficSafe(f.wx, f.w) || blockedGrind(f.wx, f.w)) return;
+    S.feats.push(f);
+    census.grom = (census.grom || 0) + 1;
+    gapHasGrom = true;
+  }
+
   function spawn() {
     if (S.dist + (S.nextX - S.p.x) > lenNow() - 220) { S.nextX += 1e6; return; }
     const teach = LV.n <= 4 && S.t < 4.2;
@@ -722,9 +869,14 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       k = nextParkKind(park);
     }
     place(mkFeat(k, lesson));
-    // Amplify traffic so the park feels alive (still skipped in teach window).
-    if (!teach && rng() < LV.mob * diff().pit * 1.45) {
-      place(mkFeat(LV.skiers && mobI++ % 2 === 1 ? "skier" : "grom"));
+    // New park feature opens a fresh gap — at most one grom may fill it.
+    gapHasGrom = false;
+    if (!teach && LV.n >= 2 && rng() < LV.mob * diff().pit * 1.55) {
+      placeGromInGap();
+    }
+    // Skiers stay on later lines (world-atlas patrol); never replace Franz groms.
+    if (!teach && LV.skiers && rng() < LV.mob * diff().pit * 0.55) {
+      place(mkFeat("skier"));
     }
   }
 
@@ -805,6 +957,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   }
 
   function settleSpin(dt: number) {
+    // Hold = backflips exactly as before (continuous while held). Taps do not drive this axis.
     const dir = S.spinDir >= 0 ? 1 : -1;
     if (S.holding && !S.p.on) S.flip += SPIN * dt * dir;
     else if (S.holding && S.grindOn) S.flip += SPIN * 0.75 * dt * dir;
@@ -820,12 +973,19 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     }
   }
 
+  /** Nearest half/full turn (180° grid) for one rotation axis. */
   function spinBucket(absRad: number) {
     const deg = absRad * (180 / Math.PI);
     const nearest = Math.round(deg / 180) * 180;
-    if (nearest < 180) return { deg: 0, err: deg };
-    const clamped = Math.min(720, Math.max(180, nearest));
-    return { deg: clamped, err: Math.abs(deg - clamped) };
+    return { deg: nearest, err: Math.abs(deg - nearest), raw: deg };
+  }
+
+  /** Axis is clean if near 0 (no rot) or within ±window of a half/full turn. */
+  function axisClean(absRad: number) {
+    const b = spinBucket(absRad);
+    if (b.raw < SPIN_NO_DEG) return { ok: true, bucket: { deg: 0, err: b.raw, raw: b.raw } };
+    if (b.deg >= 180 && b.err <= SPIN_LAND_WIN_DEG) return { ok: true, bucket: b };
+    return { ok: false, bucket: b };
   }
 
   function sideLabel() { return S.spinDir >= 0 ? "Frontside" : "Backside"; }
@@ -872,80 +1032,113 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   }
 
   function scoreLanding(onGrind: boolean) {
-    const absFlip = Math.abs(S.flip);
-    const bucket = spinBucket(absFlip);
-    const windowDeg = (S.postLip > 0 ? 42 : 32);
-    let clean = bucket.deg > 0 && bucket.err <= windowDeg;
-    let sloppy = bucket.deg > 0 && bucket.err <= windowDeg * 1.85;
-    let bail = absFlip > 0.9 && !clean && !sloppy;
-    // Land still grabbing → sloppy at best, bail if deep into the grab.
+    const flipAx = axisClean(Math.abs(S.flip));
+    const yawAx = axisClean(Math.abs(S.yaw));
     const stillGrab = !!(S.grab && S.grabEase > 0.28);
-    if (stillGrab) {
-      if (S.grabEase > 0.72 || S.grabHeld) bail = true;
-      else { sloppy = true; clean = false; }
-    }
     const grab = S.grabEase > 0.12 ? S.grab : null;
     const side = sideLabel();
-    let name = "";
-    let pts = 0;
-    let grade: "clean" | "sloppy" | "bail" | "ok" = "ok";
+
+    const clearAirSpin = () => {
+      S.airBoostUsed = false;
+      S.yaw = 0;
+      S.flip = 0; S.grab = null; S.grabEase = 0; S.grabHeld = false; S.windup = 0;
+      S.grindExit = false; S.airFrom = null; S.grindStyle = "fifty";
+    };
 
     if (onGrind && S.grindExit) {
-      // Scored on pop-off; grind time already paid.
-      name = grindStyleName(S.grindStyle, S.spinDir >= 0);
-      if (bucket.deg >= 270 && clean) name = "270 " + (S.spinDir >= 0 ? "On" : "Off");
-      pts = 18 + Math.round(S.grindT * 10);
+      let name = grindStyleName(S.grindStyle, S.spinDir >= 0);
+      if (flipAx.bucket.deg >= 270 && flipAx.ok) {
+        name = "270 " + (S.spinDir >= 0 ? "On" : "Off");
+      }
+      const pts = 18 + Math.round(S.grindT * 10);
       S.trickRails++;
-      grade = "clean";
-    } else if (bail) {
-      grade = "bail";
-      S.landBad = 0.7; S.combo = 0;
-      pushPop(stillGrab ? "GRAB BAIL" : "BAIL", 0.65);
-      beep(160, 0.1, "sawtooth", 0.1);
-      S.flip = 0; S.grab = null; S.grabEase = 0; S.grabHeld = false; S.windup = 0;
-      S.grindExit = false; S.airFrom = null;
+      S.flipPts += pts;
+      S.lastTrickName = name;
+      pushPop(name + " +" + pts, 0.9);
+      beep(640, 0.05, "triangle", 0.09);
+      comboAdd(1);
+      trickTick(name);
+      clearAirSpin();
       return;
-    } else if (bucket.deg >= 180) {
-      grade = clean ? "clean" : "sloppy";
-      const spinName = side + " " + bucket.deg;
-      name = grab ? spinName + " " + grab : spinName;
-      const base = bucket.deg === 180 ? 22 : bucket.deg === 360 ? 48 : bucket.deg === 540 ? 78 : 110;
-      pts = Math.round(base * (clean ? 1 : 0.55) * (grab ? 1.35 : 1));
-      S.trickFlips += Math.max(1, Math.round(bucket.deg / 360));
+    }
+
+    // Both axes must land clean — bad flip OR bad yaw crashes (no spin label).
+    const grabBail = stillGrab && (S.grabEase > 0.72 || S.grabHeld);
+    if (!flipAx.ok || !yawAx.ok || grabBail) {
+      S.combo = 0;
+      clearAirSpin();
+      fall();
+      return;
+    }
+
+    const yawDeg = yawAx.bucket.deg;
+    const flipDeg = flipAx.bucket.deg;
+    let name = "";
+    let pts = 0;
+    let tierLabel = "";
+
+    // Tap-yaw scored tiers (360…1080); hold-flip can combine (e.g. flip + 360).
+    const tierPts = yawDeg >= 360 ? SPIN_PTS[yawDeg] : undefined;
+    if (tierPts != null) {
+      pts = tierPts + (grab ? Math.round(tierPts * 0.2) : 0) + (flipDeg >= 180 ? 40 : 0);
+      tierLabel = yawDeg + "!";
+      name = side + " " + yawDeg;
+      if (flipDeg >= 180) name += " Flip";
+      if (grab) name += " " + grab;
+      S.trickFlips += Math.max(1, Math.round(yawDeg / 360));
       if (grab) S.trickGrabs++;
-      if (grab && bucket.deg >= 360) S.trickCombos++;
+      if (grab && yawDeg >= 360) S.trickCombos++;
+    } else if (yawDeg === 180 || flipDeg >= 180) {
+      const deg = Math.max(yawDeg, flipDeg);
+      name = grab ? side + " " + deg + " " + grab : side + " " + deg;
+      if (yawDeg === 180 && flipDeg >= 180) name = side + " 180 Flip" + (grab ? " " + grab : "");
+      pts = grab ? 36 : 22;
+      S.trickFlips += 1;
+      if (grab) S.trickGrabs++;
     } else if (grab) {
-      grade = stillGrab ? "sloppy" : "clean";
       name = grab;
       pts = stillGrab ? 14 : 24;
       S.trickGrabs++;
-    } else if (S.airFrom) {
-      grade = "ok";
-      name = lipLabel(S.airFrom);
-      pts = 0;
     }
 
     if (name && pts > 0) {
       const mult = 1 + Math.min(3, Math.floor(S.combo / COMBO_NEED));
-      const award = Math.round(pts * (grade === "sloppy" ? 0.7 : 1) * (mult > 1 ? 1 + (mult - 1) * 0.15 : 1));
+      const award = Math.round(pts * (mult > 1 ? 1 + (mult - 1) * 0.12 : 1));
       S.flipPts += award;
       S.lastTrickName = name;
-      const tag = grade === "sloppy" ? " SLOPPY" : grade === "clean" && mult > 1 ? " ×" + mult : "";
-      pushPop(name + " +" + award + tag, 0.95);
-      beep(grade === "sloppy" ? 400 : 720, 0.05, "triangle", 0.09);
-      comboAdd(1 + (bucket.deg >= 360 ? 1 : 0) + (grab ? 1 : 0));
-      trickTick(name);
-      if (S.grindExit || (S.airFrom && bucket.deg >= 180)) {
-        S.comboPts += 8;
+      if (tierLabel) {
+        pushPop(tierLabel, 1.05, -102, 20);
+        spinLandSfx(yawDeg);
+      } else {
+        pushPop(name + " +" + award, 0.9);
+        beep(720, 0.05, "triangle", 0.09);
       }
-    } else if (absFlip > 0.85 && !clean) {
-      S.landBad = 0.55; S.combo = 0;
-      pushPop("MESSY", 0.55);
-      beep(180, 0.08, "sawtooth", 0.08);
+      comboAdd(1 + (yawDeg >= 360 ? 1 : 0) + (grab ? 1 : 0));
+      trickTick(name);
+      if (S.airFrom && (yawDeg >= 180 || flipDeg >= 180)) S.comboPts += 8;
     }
 
-    S.flip = 0; S.grab = null; S.grabEase = 0; S.grabHeld = false; S.windup = 0;
-    S.grindExit = false; S.airFrom = null; S.grindStyle = "fifty";
+    clearAirSpin();
+  }
+
+  /** Crisp spin-land sting — brighter for higher tiers. */
+  function spinLandSfx(deg: number) {
+    if (muted) return;
+    try {
+      if (!ensureAC() || !ac) return;
+      const t = ac.currentTime;
+      const base = 520 + Math.min(400, (deg - 360) * 0.35);
+      for (let i = 0; i < 2; i++) {
+        const o = ac.createOscillator(); const g = ac.createGain();
+        o.type = i === 0 ? "square" : "triangle";
+        o.frequency.setValueAtTime(base * (i === 0 ? 1 : 1.5), t);
+        o.frequency.exponentialRampToValueAtTime(base * (i === 0 ? 1.35 : 2), t + 0.06);
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(i === 0 ? 0.12 : 0.07, t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.18);
+      }
+    } catch { /* ignore */ }
   }
 
   function lipLabel(k: string) {
@@ -967,33 +1160,55 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     beep(980, 0.05, "square", 0.09);
   }
 
+  /** Ground / grind takeoff only. Air actions go through airTap() after a short press. */
   function jump() {
     if (S.mode !== "play") return;
     const now = performance.now();
     const p = S.p;
-    if (p.on || S.grindOn) {
-      const fromK = S.grindOn ? S.grindOn.k : null;
-      const wasGrind = !!S.grindOn;
-      p.vy = JV * board().pop * (wasGrind && fromK === "rail" ? 1.06 : wasGrind && fromK === "log" ? 1.03 : 1);
-      p.on = false;
-      if (wasGrind) { S.airFrom = fromK; S.grindExit = true; }
-      else { const lf0 = lipNear(); if (lf0) S.airFrom = lf0.k; }
-      S.grindOn = null;
-      S.lastTap = now;
-      jumpBoing();
-      if (wasGrind) { S.pops.push({ x: p.x, y: p.y - 52, l: 0.55, txt: fromK === "rail" ? "RAIL POP" : fromK === "log" ? "LOG POP" : "POP" }); beep(640, 0.04, "square", 0.07); }
-      const lf = lipNear();
-      if (lf && !S.lipHit[lf.wx]) awardLip(lf);
-      return;
-    }
-    if (S.lastTap > 0 && now - S.lastTap < 280) {
-      p.vy = Math.max(JV, p.vy + JV * 0.28);
-      S.lastTap = 0;
-      S.pops.push({ x: p.x, y: p.y - 40, l: 0.45, txt: "POP" });
-      beep(520, 0.04, "triangle", 0.07);
-      return;
-    }
+    if (!(p.on || S.grindOn)) return;
+    const fromK = S.grindOn ? S.grindOn.k : null;
+    const wasGrind = !!S.grindOn;
+    p.vy = JV * board().pop * (wasGrind && fromK === "rail" ? 1.06 : wasGrind && fromK === "log" ? 1.03 : 1);
+    p.on = false;
+    if (wasGrind) { S.airFrom = fromK; S.grindExit = true; }
+    else { const lf0 = lipNear(); if (lf0) S.airFrom = lf0.k; }
+    S.grindOn = null;
+    S.airBoostUsed = false;
+    S.yaw = 0;
     S.lastTap = now;
+    jumpBoing();
+    if (wasGrind) {
+      S.pops.push({ x: p.x, y: p.y - 52, l: 0.55, txt: fromK === "rail" ? "RAIL POP" : fromK === "log" ? "LOG POP" : "POP" });
+      beep(640, 0.04, "square", 0.07);
+    }
+    const lf = lipNear();
+    if (lf && !S.lipHit[lf.wx]) awardLip(lf);
+  }
+
+  /**
+   * Confirmed air tap (press ≤ TAP_MS). Second tap = one small boost;
+   * each later tap adds one half-turn of yaw. Hold backflips are separate.
+   */
+  function airTap() {
+    if (S.mode !== "play") return;
+    const p = S.p;
+    if (p.on || S.grindOn) return;
+    const now = performance.now();
+    if (!S.airBoostUsed) {
+      S.airBoostUsed = true;
+      S.lastTap = now;
+      p.vy += JV * AIR_BOOST_FRAC;
+      if (p.vy < JV * 1.12) p.vy = JV * 1.12;
+      beep(500, 0.035, "triangle", 0.06);
+      return;
+    }
+    // +180° yaw per tap (capped at 1080°).
+    const dir = S.spinDir >= 0 ? 1 : -1;
+    S.yaw += TAP_SPIN_HALF * dir;
+    if (Math.abs(S.yaw) > YAW_MAX) S.yaw = Math.sign(S.yaw) * YAW_MAX;
+    S.lastTap = now;
+    const halfs = Math.round(Math.abs(S.yaw) / Math.PI);
+    beep(480 + Math.min(6, halfs) * 55, 0.03, "square", 0.065);
   }
 
   function fall() {
@@ -1005,6 +1220,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     S.heartFlashT = LIFE_PAUSE;
     S.autoRetry = false;
     S.grindExit = false; S.airFrom = null;
+    S.airBoostUsed = false; S.yaw = 0; S.flip = 0;
     if (!reduce) { S.shake = 10; S.flash = -0.35; }
     puff(S.p.x, S.p.y - 10, 22, "#ffffff", 220);
     const sc = score();
@@ -1044,6 +1260,8 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     S.heartFlashT = Math.max(0, S.heartFlashT - dt);
     S.heartGainT = Math.max(0, S.heartGainT - dt);
     S.postLip = Math.max(0, S.postLip - dt);
+    // Defer hold-flip until past TAP_MS so a short air tap is never a flip.
+    if (pressArmed && !S.holding && (performance.now() - pressAt) > TAP_MS) S.holding = true;
     // Grab pose: ease in while held, ease out on release (must release before landing).
     if (S.grab && S.grabHeld && !S.p.on) S.grabEase = Math.min(1, S.grabEase + dt * 5.5);
     else if (S.grabEase > 0) {
@@ -1103,6 +1321,8 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
         p.vy = Math.max((kick ? JV * 1.08 : JV * 0.86) * board().pop, S.climbVy * (kick ? 1.08 : 0.9));
         S.hop = 1; S.climbVy = 0;
         if (!S.holding) S.flip = 0;
+        S.airBoostUsed = false;
+        S.yaw = 0;
         if (lf0) S.airFrom = lf0.k;
         S.lastTap = performance.now();
         S.postLip = POST_LIP * diff().lip * board().lip;
@@ -1199,20 +1419,30 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     for (const gm of S.feats) {
       const gd = FEAT[gm.k];
       if (!gd?.mob) continue;
-      // Walk slowly toward the rider, but never reverse world-x (no "backing up")
-      // and never enter approach / landing / air-arc zones.
-      const stepWx = Math.abs(gm.vx) * dt;
-      const next = gm.wx - stepWx;
-      if (trafficSafe(next, gm.w) && !blockedGrind(next, gm.w)) gm.wx = next;
-      else if (!trafficSafe(gm.wx, gm.w)) {
-        // Nudge out of a zone if a feature spawned around them.
-        gm.wx += stepWx * 1.4;
+      const sitting = gm.k === "grom" && gm.pose === "sit";
+      // Ride groms drift slowly toward the rider on flat stretches only.
+      // Sit groms stay put on decks / runouts.
+      if (!sitting && Math.abs(gm.vx) > 0.1) {
+        const stepWx = Math.abs(gm.vx) * dt;
+        const next = gm.wx - stepWx;
+        if (trafficSafe(next, gm.w) && !blockedGrind(next, gm.w)) gm.wx = next;
+        else if (!trafficSafe(gm.wx, gm.w)) {
+          gm.wx += stepWx * 1.4;
+        }
       }
       const gsx = gm.wx - S.dist + p.x;
       const gy = gY(gsx);
       const hw = gm.w * 0.42;
-      const top = gy - gm.h;
+      const top = gy - gm.h * (sitting ? 0.92 : 1);
       const above = p.y < top - 2;
+      // Jump clear → small one-shot bonus.
+      if (above && !gm.cleared && gsx > p.x - hw && gsx < p.x + hw) {
+        gm.cleared = true;
+        const bonus = gm.k === "skier" ? 18 : 28;
+        S.comboPts += bonus;
+        S.pops.push({ x: p.x, y: p.y - 56, l: 0.7, txt: "+" + bonus });
+        S.flash = Math.max(S.flash, 0.12);
+      }
       if (!god && !S.grindOn && !above && gsx > p.x - hw && gsx < p.x + hw && p.y > top + 2 && p.y < gy + 4) {
         S.pops.push({ x: p.x, y: p.y - 48, l: 0.6, txt: gm.k === "skier" ? "SKIER" : "GROM" });
         updateCam(dt); fall(); return;
@@ -1327,7 +1557,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       if (f.y > worldH + 12) {
         f.y = -6 - Math.random() * 40;
         f.x = Math.random() * W;
-        f.r = 1.1 + Math.random() * 2.8;
+        f.r = 2.0 + Math.random() * 2.0;
         f.z = Math.random();
       }
       if (f.x < -24) f.x += W + 48;
@@ -1577,10 +1807,11 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     cx.globalAlpha = 1;
   }
   function corduroy(x0: number, x1: number, yFn: (x: number) => number) {
-    cx.strokeStyle = "rgba(150,140,175,0.4)"; cx.lineWidth = 1;
-    for (let x = x0; x < x1; x += 4) {
+    // Sparse soft groom marks on features only — match white/blue-white snow.
+    cx.strokeStyle = "rgba(150,170,190,0.22)"; cx.lineWidth = 1;
+    for (let x = x0; x < x1; x += 10) {
       const y = yFn(x);
-      cx.beginPath(); cx.moveTo(x, y + 1); cx.lineTo(x + 2.5, y + 7); cx.stroke();
+      cx.beginPath(); cx.moveTo(x, y + 2); cx.lineTo(x + 3, y + 6); cx.stroke();
     }
   }
   /** Feature built INTO the snow — no floating slab. Surface already shaped by featH/gY. */
@@ -1597,7 +1828,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     for (let x = L; x <= R; x += 5) cx.lineTo(x, gY(x));
     for (let x = R; x >= L; x -= 5) cx.lineTo(x, gY(x) + 9);
     cx.closePath();
-    cx.fillStyle = "rgba(90,70,130,0.18)";
+    cx.fillStyle = "rgba(120,150,180,0.12)";
     cx.fill();
     // Packed face highlight along takeoff → deck
     cx.beginPath();
@@ -1609,7 +1840,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     cx.fill();
     corduroy(L, R, (x) => gY(x));
     // Soft shadow under landing slope
-    cx.fillStyle = "rgba(40,20,70,0.14)";
+    cx.fillStyle = "rgba(90,120,150,0.10)";
     cx.beginPath();
     cx.moveTo(lipX, gY(lipX) + 2);
     for (let x = lipX; x <= R; x += 6) cx.lineTo(x, gY(x) + 2);
@@ -1823,13 +2054,23 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       drawMob(f, sx);
     }
   }
-  /** Traffic — Franz skier/patrol frames (face left); vector fallback otherwise. */
+  /** Traffic — Franz grom atlas (kid) + skier/patrol; vector fallback otherwise. */
   function drawMob(f: Feat, sx: number) {
     const gy = gY(sx);
-    const bob = Math.sin(S.t * 6 + f.ph) * 2;
+    const bob = f.pose === "sit" ? 0 : Math.sin(S.t * 6 + f.ph) * 2;
     const ski = f.k === "skier";
-    if (artOk() && art.world) {
-      const fr = ski ? WORLD_FRAMES.patrol : WORLD_FRAMES.skier;
+    // Franz Grom 1 — sit on decks/runouts, ride on flats; faces +X / downhill.
+    if (!ski && art.grom) {
+      const fr = f.pose === "sit" ? GROM_FRAMES.grom_sit : GROM_FRAMES.grom_ride;
+      const { w: mw } = sprWu(fr);
+      contactShadow(sx, gy, mw * 0.34, 3.2, 0.22);
+      const rot = f.pose === "sit" ? 0 : slopeAt(sx) * 0.35;
+      drawAtlasFrame(cx, art.grom, fr, sx, gy + 1 + bob * 0.25, atlasDpr(), scale, spriteG, 1, rot);
+      if (overviewCam) overviewTag("GROM", sx, gy - 48);
+      return;
+    }
+    if (artOk() && art.world && ski) {
+      const fr = WORLD_FRAMES.patrol;
       const { w: mw } = sprWu(fr);
       contactShadow(sx, gy, mw * 0.35, 3.5, 0.24);
       drawAtlasFrame(cx, art.world, fr, sx, gy + 1, atlasDpr(), scale, spriteG, 1, slopeAt(sx) * 0.4);
@@ -2012,7 +2253,9 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     const air = !S.p.on && !S.grindOn;
     let base = poseIdle(air);
     if (S.grindOn) base = poseRail(S.grindStyle);
-    else if (air && (S.holding || Math.abs(S.flip) > 0.2)) base = poseSpin(true, S.flip, 0, S.spinDir);
+    else if (air && (S.holding || Math.abs(S.flip) > 0.2 || Math.abs(S.yaw) > 0.2)) {
+      base = poseSpin(true, S.flip + S.yaw, 0, S.spinDir);
+    }
     else if (!air && S.windup > 0.05) base = poseSpin(false, 0, S.windup, S.spinDir);
     if (S.grab && S.grabEase > 0.01 && air) {
       base = lerpPose(base, poseGrab(S.grab), S.grabEase);
@@ -2147,22 +2390,24 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     }
     cx.save();
     cx.translate(p.x, p.y + hopY);
+    // Rider v2 faces +X (downhill) as authored — no facing mirror.
     if (artOk() && art.rider) {
       const fr = RIDER_FRAMES[riderFrameId()];
       let rot = 0;
-      if (S.mode === "over") rot = 0.9;
+      if (S.mode === "over") rot = -0.9;
       else if (S.grindOn) {
         // Board snapped to rail: pitch follows deck; boardslide faces across.
         rot = slope * 0.55 + (S.grindStyle === "nose" ? -0.1 : S.grindStyle === "tail" ? 0.1 : S.grindStyle === "boardslide" || S.grindStyle === "lipslide" ? 0.04 : 0.02);
       } else if (p.on) rot = slope * 0.85;
       else {
         rot = Math.max(-0.25, Math.min(0.35, -p.vy / 2200));
-        if (Math.abs(S.flip) > 0.25) rot += S.flip;
+        if (Math.abs(S.flip) > 0.25 || Math.abs(S.yaw) > 0.25) rot += S.flip + S.yaw;
       }
       cx.rotate(rot);
-      // Slide atlas has transparent padding under the board — nest so the deck kisses the rail top.
-      const nest = S.grindOn ? (RIDE_NATIVE_CSS * spriteG) * 0.04 * (atlasDpr() / scale) : 0;
-      if (nest) cx.translate(0, nest);
+      // Grind: nest into rail top. Snow: lift so the board sole sits on the crest (not sunk through it).
+      const unit = (RIDE_NATIVE_CSS * spriteG) * (atlasDpr() / scale);
+      if (S.grindOn) cx.translate(0, unit * 0.04);
+      else if (p.on) cx.translate(0, -unit * 0.09);
       // Dark rim / soft outline so the rider reads in front of the tree band.
       cx.save();
       cx.shadowColor = "rgba(6,2,18,0.95)";
@@ -2175,12 +2420,15 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       let pitch = p.on || S.grindOn
         ? slope + (S.grindOn ? (S.grindStyle === "nose" ? -0.12 : S.grindStyle === "tail" ? 0.12 : 0.04) : 0)
         : Math.max(-0.2, Math.min(0.35, -p.vy / 2200));
-      if (!p.on && !S.grindOn && Math.abs(S.flip) > 0.25) pitch += Math.sin(S.flip) * 0.08;
+      if (!p.on && !S.grindOn && (Math.abs(S.flip) > 0.25 || Math.abs(S.yaw) > 0.25)) {
+        pitch += Math.sin(S.flip + S.yaw) * 0.08;
+      }
       cx.rotate(pitch);
       if (S.mode === "over") { cx.translate(0, 4); cx.rotate(0.9); }
       const BB = board();
       paintRider(currentPose(), BB.c, BB.s);
     }
+    // Boost jets aft of the board (local −X while facing +X).
     if (!p.on && S.boostT > 0) {
       cx.fillStyle = "rgba(255,120,40,0.55)";
       for (let i = 0; i < 4; i++) cx.fillRect(-6 - i * 3, 8 + i * 4, 4, 6);
@@ -2257,61 +2505,147 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   function draw() {
     if (poseSheetLock) { renderPoseSheet(); return; }
     cx.setTransform(1, 0, 0, 1, 0, 0);
-    cx.fillStyle = "#140828";
+    const bgId = activeBackdrop();
+    // Sky extension sampled from backdrop top row — matches art, no mismatched band.
+    const skyTop = art.bgSky[bgId] || (bgId === "night" ? "#0c1028" : "#0552a0");
+    cx.fillStyle = skyTop;
     cx.fillRect(0, 0, canvas.width, canvas.height);
 
     cx.setTransform(scale, 0, 0, scale, 0, 0);
-    const bgId = activeBackdrop();
-    // Theme fill under/around opaque resort backdrop (shows only if bg missing).
     const sky = cx.createLinearGradient(0, 0, 0, worldH);
     if (bgId === "night") {
-      sky.addColorStop(0, "#07061a"); sky.addColorStop(0.55, "#1a1840"); sky.addColorStop(1, "#3a3558");
+      sky.addColorStop(0, skyTop); sky.addColorStop(0.6, "#141830"); sky.addColorStop(1, "#2a3048");
     } else {
-      sky.addColorStop(0, "#4aa0e8"); sky.addColorStop(0.45, "#7ec4f2"); sky.addColorStop(1, "#d8ecfa");
+      // Keep the top matching the art; ease slightly lighter downward so the
+      // mountain plate never sits under a darker mismatched slab.
+      sky.addColorStop(0, skyTop); sky.addColorStop(0.35, skyTop); sky.addColorStop(1, "#3a7ec4");
     }
     cx.fillStyle = sky; cx.fillRect(-80, 0, W + 160, worldH);
 
     cx.save();
     cx.translate(camX, OY);
-    // Clip world below the HUD so scenery never crosses chrome.
+    // Clip below chrome only — keep this tight so the backdrop runs up behind the HUD.
     const dpr = window.devicePixelRatio || 1;
-    const hudWorld = ((tallPhone ? 118 : 56) * dpr) / scale;
+    const hudWorld = ((tallPhone ? 64 : 44) * dpr) / scale;
     cx.beginPath();
     cx.rect(-camX - 80, -OY + hudWorld, W + 160, worldH + 40);
     cx.clip();
     if (S.shake > 0 && !reduce) { cx.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake); S.shake *= 0.9; if (S.shake < 0.5) S.shake = 0; }
     const clipTop = -OY + hudWorld;
     const viewL = -camX - 40; const viewR = -camX + W + 40;
-    const wuPerCss = dpr / Math.max(1e-6, scale);
     let crestSample = 0;
-    for (let i = 0; i < 5; i++) crestSample += snowY(viewL + ((viewR - viewL) * (i + 0.5)) / 5);
-    const crestY = crestSample / 5;
+    let crestLow = -Infinity;
+    for (let i = 0; i < 8; i++) {
+      const y = snowY(viewL + ((viewR - viewL) * (i + 0.5)) / 8);
+      crestSample += y;
+      if (y > crestLow) crestLow = y;
+    }
+    const crestY = crestSample / 8;
 
-    // Resort backdrop (opaque 780×520): slow far parallax, bottom-anchored so
-    // its open snow sits behind the play lane; uniform scale, tiled horizontally.
+    // Resort backdrop: bottom-anchored far parallax (no tilt). Portrait keeps peaks
+    // near 35–45% screen height; above the tile is a vertical sky gradient sampled
+    // from the tile top row with a ~40 CSS-px feathered seam (no hard band).
     {
       const img = art.bg[bgId];
       if (img === undefined) void ensureBackdrop(art, bgId).then(() => draw());
+      const bot = (Number.isFinite(crestLow) ? crestLow : crestY) + 52;
       if (img) {
-        // Anchor bottom slightly into the crest so play-lane snow covers the bg snow.
-        const bot = crestY + 14;
-        const maxH = Math.max(60, bot - (clipTop + 10));
-        // Cover height without distortion (letterbox width via tiling).
-        let hWu = maxH;
-        // Prefer authored aspect; don't upscale past ~native CSS height on tall phones.
-        const nativeHWu = BG_H * wuPerCss;
-        if (hWu > nativeHWu * 1.15) hWu = nativeHWu * 1.15;
-        if (hWu > maxH) hWu = maxH;
-        const wWu = hWu * (BG_W / BG_H);
-        const topY = bot - hWu;
-        const par = 0.055;
-        const off = ((S.dist * par) % wWu + wWu) % wWu;
-        for (let x = Math.floor((viewL - wWu) / wWu) * wWu; x < viewR + wWu; x += wWu) {
-          cx.drawImage(img, x - off, topY, wWu, hWu);
+        const aspect = BG_W / BG_SRC_H;
+        const needH = Math.max(90, bot - clipTop);
+        const needW = Math.max(120, viewR - viewL);
+        let wWu: number;
+        let hWu: number;
+        if (landscape) {
+          // Exactly one plate spanning the view — never tile 2–3 copies.
+          wWu = Math.max(needW * 1.02, needH * 1.05 * aspect);
+          hWu = wWu / aspect;
+        } else {
+          // Tall phones: start the plate ~18% down so peaks read near 35–45% height
+          // (not a thin strip under a flat empty sky).
+          const wantTopY = clipTop + needH * 0.18;
+          hWu = Math.max(200, bot - wantTopY);
+          wWu = hWu * aspect;
+          if (wWu < needW) { wWu = needW; hWu = wWu / aspect; }
         }
+        const topY = bot - hWu;
+        const par = landscape ? 0.02 : 0.028;
+        const off = landscape
+          ? ((S.dist * par) % (wWu * 0.35))
+          : ((S.dist * par) % wWu + wWu) % wWu;
+        const featherWu = Math.max(28, (40 * dpr) / Math.max(1e-6, scale));
+        const skyRgb = (() => {
+          if (skyTop.startsWith("#") && skyTop.length >= 7) {
+            return [
+              parseInt(skyTop.slice(1, 3), 16),
+              parseInt(skyTop.slice(3, 5), 16),
+              parseInt(skyTop.slice(5, 7), 16),
+            ] as const;
+          }
+          const m = (skyTop.match(/\d+/g) || ["80", "160", "220"]).map(Number);
+          return [m[0] || 80, m[1] || 160, m[2] || 220] as const;
+        })();
+        const rgba = (r: number, g: number, b: number, a: number) =>
+          `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+        // Fill ABOVE the tile only with a vertical gradient from the tile top-row color
+        // (deeper at the chrome, matching at the seam). Do not paint opaque fill over the
+        // plate's own cloudy sky — that reads as a hard empty band.
+        if (topY > clipTop - 2) {
+          const deep = [
+            Math.max(0, skyRgb[0] * 0.68),
+            Math.max(0, skyRgb[1] * 0.74),
+            Math.max(0, skyRgb[2] * 0.86),
+          ] as const;
+          const mid = [
+            (skyRgb[0] * 0.88 + deep[0] * 0.12),
+            (skyRgb[1] * 0.9 + deep[1] * 0.1),
+            (skyRgb[2] * 0.94 + deep[2] * 0.06),
+          ] as const;
+          const skyG = cx.createLinearGradient(0, clipTop - 4, 0, topY);
+          skyG.addColorStop(0, rgba(deep[0], deep[1], deep[2], 1));
+          skyG.addColorStop(0.55, rgba(mid[0], mid[1], mid[2], 1));
+          skyG.addColorStop(1, rgba(skyRgb[0], skyRgb[1], skyRgb[2], 1));
+          cx.fillStyle = skyG;
+          cx.fillRect(viewL - 40, clipTop - 4, (viewR - viewL) + 80, topY - clipTop + 6);
+        }
+        const natW = img.naturalWidth || BG_W;
+        const natH = img.naturalHeight || BG_H;
+        const srcY = Math.round((BG_SRC_TOP / BG_H) * natH);
+        const srcEnd = Math.round((BG_SRC_END / BG_H) * natH);
+        const srcH = Math.max(1, srcEnd - srcY);
+        if (landscape) {
+          const x0 = (viewL + viewR) * 0.5 - wWu * 0.5 - off;
+          cx.drawImage(img, 0, srcY, natW, srcH, x0, topY, wWu, hWu);
+        } else {
+          const x0 = viewL + (needW - wWu) * 0.5 - (off % Math.max(1, wWu - needW + 1));
+          cx.drawImage(img, 0, srcY, natW, srcH, x0, topY, wWu, hWu);
+        }
+        // ~40 CSS-px soft feather at the seam — light alpha so plate clouds stay visible.
+        {
+          const tf = cx.createLinearGradient(0, topY - 1, 0, topY + featherWu);
+          tf.addColorStop(0, rgba(skyRgb[0], skyRgb[1], skyRgb[2], 0.55));
+          tf.addColorStop(0.4, rgba(skyRgb[0], skyRgb[1], skyRgb[2], 0.22));
+          tf.addColorStop(1, rgba(skyRgb[0], skyRgb[1], skyRgb[2], 0));
+          cx.fillStyle = tf;
+          cx.fillRect(viewL - 40, topY - 2, (viewR - viewL) + 80, featherWu + 4);
+        }
+        // Dissolve only the lowest fringe into slope snow — keeps peaks/gondola readable.
+        const hazeH = Math.min(hWu * 0.22, 64);
+        const haze = cx.createLinearGradient(0, bot - hazeH, 0, bot + 2);
+        if (bgId === "night") {
+          haze.addColorStop(0, "rgba(210,220,235,0)");
+          haze.addColorStop(0.45, "rgba(210,220,235,0.28)");
+          haze.addColorStop(1, "rgba(230,236,244,0.9)");
+        } else {
+          haze.addColorStop(0, "rgba(247,251,255,0)");
+          haze.addColorStop(0.4, "rgba(247,251,255,0.28)");
+          haze.addColorStop(1, "rgba(247,251,255,0.92)");
+        }
+        cx.fillStyle = haze;
+        cx.fillRect(viewL - 40, bot - hazeH, (viewR - viewL) + 80, hazeH + 4);
       } else {
-        // Soft fallback silhouette while lazy-loading / on error.
-        cx.fillStyle = bgId === "night" ? "#2a2850" : "#6a90b8";
+        cx.fillStyle = skyTop;
+        cx.fillRect(viewL - 20, clipTop, (viewR - viewL) + 40, bot - clipTop);
+        cx.fillStyle = bgId === "night" ? "#2a3048" : "#8ab0d0";
         cx.beginPath();
         cx.moveTo(viewL - 20, crestY);
         cx.lineTo(viewL + W * 0.25, crestY - 50);
@@ -2325,184 +2659,84 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
 
     treeDbg = [];
     fgDbg = [];
-    // Full-detail atlas pines only: at most 1–2 per screen (no dense rows / far tiles).
+    // Sparse scenery: at most 1–2 full-detail atlas pines (never a dense mid-row).
     {
-      const detailPer = landscape ? 360 : 290;
-      const detailOff = (S.dist * 0.28) % detailPer;
+      const maxPines = landscape ? 1 : 2;
+      const detailPer = landscape ? 520 : 420;
+      const detailOff = (S.dist * 0.22) % detailPer;
       let drawn = 0;
-      for (let c = -2; c <= 5 && drawn < 2; c++) {
-        const x = 70 + c * detailPer - detailOff;
+      for (let c = -1; c <= 4 && drawn < maxPines; c++) {
+        const x = 90 + c * detailPer - detailOff;
         if (x < viewL - 10 || x > viewR + 10) continue;
         const wx = S.dist + x - S.p.x;
         if (featBlocksTree(wx)) continue;
-        if (Math.abs(x - S.p.x) < 80) continue;
+        if (Math.abs(x - S.p.x) < 100) continue;
         const tallPick = ((Math.floor(wx / detailPer) % 2) === 0);
-        pine(x, snowY(x) + 10, tallPick ? 0.9 : 0.76, "mid", true, tallPick);
+        pine(x, snowY(x) + 10, tallPick ? 0.86 : 0.72, "mid", true, tallPick);
         drawn++;
       }
-      if (drawn === 0) {
-        const x = Math.min(viewR - 60, Math.max(viewL + 60, S.p.x + (landscape ? 220 : 160)));
-        pine(x, snowY(x) + 10, 0.82, "mid", true, true);
+      // Portrait only: if none survived culling, place a single pine off the rider —
+      // landscape stays on the resort plate alone when empty.
+      if (drawn === 0 && !landscape) {
+        const x = Math.min(viewR - 70, Math.max(viewL + 70, S.p.x + 170));
+        pine(x, snowY(x) + 10, 0.78, "mid", true, true);
       }
     }
-    // Ride surface — covers mid-tree bases so they read behind the slope.
+    // Ride surface — clean white / blue-white snow; covers mid-tree bases.
     const snowBottom = snowFloor;
-    const snowGrad = cx.createLinearGradient(0, GROUND - 20, 0, snowBottom);
-    snowGrad.addColorStop(0, "#f7f4fb");
-    snowGrad.addColorStop(0.28, "#f0eaf6");
-    snowGrad.addColorStop(0.55, "#e4d8ec");
-    snowGrad.addColorStop(0.78, "#d0c0d8");
-    snowGrad.addColorStop(1, "#b8a4c0");
+    const snowGrad = cx.createLinearGradient(0, Math.min(crestY, GROUND) - 10, 0, snowBottom);
+    snowGrad.addColorStop(0, "#f7fbff");
+    snowGrad.addColorStop(0.35, "#eef5fb");
+    snowGrad.addColorStop(0.7, "#e2ecf5");
+    snowGrad.addColorStop(1, "#d4e0ec");
     cx.fillStyle = snowGrad; cx.beginPath(); cx.moveTo(viewL, snowBottom);
     for (let gx = viewL; gx <= viewR; gx += 8) cx.lineTo(gx, gY(gx));
     cx.lineTo(viewR, snowBottom); cx.fill();
-    // Corduroy + soft bumps fill the lower field so portrait isn't empty white.
-    const cordRows = tallPhone ? 16 : 11;
-    for (let gx = viewL; gx < viewR; gx += 4) {
-      const gy = gY(gx);
-      for (let k = 1; k <= cordRows; k++) {
-        const fade = Math.max(0, 1 - k / (cordRows + 1));
-        cx.strokeStyle = "rgba(120,100,148," + (0.38 * fade).toFixed(3) + ")";
-        cx.lineWidth = 1;
-        cx.beginPath(); cx.moveTo(gx, gy + 5 + k * 10); cx.lineTo(gx + 3.2, gy + 11 + k * 10); cx.stroke();
-      }
-    }
-    // Soft roller bumps / track scars below the crest (reads as groomed park snow).
-    cx.strokeStyle = "rgba(150,130,175,0.32)";
-    cx.lineWidth = 1.5;
-    for (let i = 0; i < (tallPhone ? 8 : 5); i++) {
-      const yOff = 22 + i * 18;
-      cx.beginPath();
-      for (let gx = viewL; gx <= viewR; gx += 9) {
-        const gy = gY(gx) + yOff + Math.sin(gx * 0.04 + i * 1.7 + S.dist * 0.008) * (3.5 - i * 0.35);
-        gx === viewL ? cx.moveTo(gx, gy) : cx.lineTo(gx, gy);
-      }
-      cx.stroke();
-    }
-    // Board tracks trailing the rider (subtle depth in the empty lower third).
-    if (!overviewCam && S.p) {
-      cx.strokeStyle = "rgba(120,100,145,0.22)";
-      cx.lineWidth = 2.2;
-      cx.lineCap = "round";
-      for (const side of [-7, 7]) {
-        cx.beginPath();
-        for (let t = 0; t < 18; t++) {
-          const x = S.p.x - 14 - t * 14;
-          const gy = gY(x) + 3 + Math.sin(t * 0.7) * 0.8;
-          t === 0 ? cx.moveTo(x + side * 0.15, gy) : cx.lineTo(x + side * 0.15, gy);
-        }
-        cx.stroke();
-      }
-    }
-    const shade = cx.createLinearGradient(0, GROUND, 0, GROUND + 120);
-    shade.addColorStop(0, "rgba(60,40,90,0.14)");
-    shade.addColorStop(1, "rgba(60,40,90,0)");
+    // Soft vertical shade only — no corduroy grid, ruled lines, or ovals/dots.
+    const shade = cx.createLinearGradient(0, crestY, 0, crestY + 160);
+    shade.addColorStop(0, "rgba(130,160,190,0.07)");
+    shade.addColorStop(1, "rgba(130,160,190,0)");
     cx.fillStyle = shade;
-    cx.fillRect(viewL, GROUND, viewR - viewL, 120);
-    cx.strokeStyle = "#c8b0e0"; cx.lineWidth = 3; cx.beginPath();
-    for (let gx = viewL; gx <= viewR; gx += 8) { const gy = gY(gx) + 1.5; gx === viewL ? cx.moveTo(gx, gy) : cx.lineTo(gx, gy); }
+    cx.fillRect(viewL, crestY - 4, viewR - viewL, 180);
+    // Soft crest lip only (no groomer ruled strokes).
+    cx.strokeStyle = "rgba(190,210,225,0.32)"; cx.lineWidth = 1.2; cx.beginPath();
+    for (let gx = viewL; gx <= viewR; gx += 8) { const gy = gY(gx); gx === viewL ? cx.moveTo(gx, gy) : cx.lineTo(gx, gy); }
     cx.stroke();
-    // Foreground depth band (no rope/flags). Portrait: darker ridge + corduroy +
-    // small rocks/tracks so the lower field isn't blank. Clear of JUMP (bottom-right).
+    // Soft foreground depth band (white/blue-white). No rocks, ovals, or dense ripples.
     if (!overviewCam) {
-      const jumpClearX = viewR - Math.min(110, (viewR - viewL) * 0.28);
-      // Tall portrait: cover the empty lower field (~20–25% of frame).
       const wantH = tallPhone
-        ? Math.min(280, Math.max(190, (snowBottom - (S.p?.y || GROUND)) * 0.72))
+        ? Math.min(220, Math.max(140, (snowBottom - (S.p?.y || GROUND)) * 0.55))
         : landscape
-          ? Math.min(48, worldH * 0.14)
-          : Math.min(64, worldH * 0.11);
-      // Keep ridge below the board so it reads as foreground depth.
-      const minBelowRider = (S.p?.y || GROUND) + 40;
+          ? Math.min(40, worldH * 0.12)
+          : Math.min(52, worldH * 0.1);
+      const minBelowRider = (S.p?.y || GROUND) + 48;
       const ridgeTop = Math.max(minBelowRider, snowBottom - wantH);
       const ridgeH = snowBottom - ridgeTop;
       if (ridgeH > 18) {
-        // Darker foreground snow ridge with clear lip
         const fgGrad = cx.createLinearGradient(0, ridgeTop, 0, snowBottom);
-        fgGrad.addColorStop(0, "#c4b4d0");
-        fgGrad.addColorStop(0.3, "#b5a2c2");
-        fgGrad.addColorStop(0.65, "#a08cb0");
-        fgGrad.addColorStop(1, "#8a7498");
+        fgGrad.addColorStop(0, "#e8f0f7");
+        fgGrad.addColorStop(0.45, "#d9e5f0");
+        fgGrad.addColorStop(1, "#c8d6e4");
         cx.fillStyle = fgGrad;
         cx.beginPath();
         cx.moveTo(viewL, snowBottom);
         for (let gx = viewL; gx <= viewR; gx += 10) {
-          const bump = Math.sin(gx * 0.028 + S.dist * 0.012) * 7
-            + Math.sin(gx * 0.07 + 1.3) * 3;
+          const bump = Math.sin(gx * 0.022 + S.dist * 0.01) * 5 + Math.sin(gx * 0.06 + 1.1) * 2;
           cx.lineTo(gx, ridgeTop + bump);
         }
         cx.lineTo(viewR, snowBottom);
         cx.closePath();
         cx.fill();
-        // Soft crest shade on the ridge lip
-        cx.strokeStyle = "rgba(70,50,100,0.34)";
-        cx.lineWidth = 2.4;
+        cx.strokeStyle = "rgba(150,175,200,0.28)";
+        cx.lineWidth = 1.5;
         cx.beginPath();
         for (let gx = viewL; gx <= viewR; gx += 8) {
-          const bump = Math.sin(gx * 0.028 + S.dist * 0.012) * 7;
+          const bump = Math.sin(gx * 0.022 + S.dist * 0.01) * 5;
           gx === viewL ? cx.moveTo(gx, ridgeTop + bump) : cx.lineTo(gx, ridgeTop + bump);
         }
         cx.stroke();
-        // Groomer corduroy across the foreground band
-        const rows = tallPhone ? 11 : 6;
-        for (let row = 0; row < rows; row++) {
-          const y0 = ridgeTop + 8 + row * (ridgeH / (rows + 0.5));
-          cx.strokeStyle = "rgba(100,80,130," + (0.28 - row * 0.015).toFixed(3) + ")";
-          cx.lineWidth = 1.15;
-          cx.beginPath();
-          for (let gx = viewL; gx <= viewR; gx += 4) {
-            const yy = y0 + Math.sin(gx * 0.055 + row * 0.7) * 1.6 + (gx - viewL) * 0.01;
-            gx === viewL ? cx.moveTo(gx, yy) : cx.lineTo(gx, yy);
-          }
-          cx.stroke();
-        }
-        // Board tracks drifting into the foreground (left/center — leave JUMP clear)
-        cx.strokeStyle = "rgba(90,70,120,0.3)";
-        cx.lineWidth = 2.2;
-        cx.lineCap = "round";
-        for (const side of [-10, 10]) {
-          cx.beginPath();
-          let started = false;
-          for (let t = 0; t < 22; t++) {
-            const x = (S.p?.x || 110) - 18 - t * 11 + side * 0.2;
-            if (x > jumpClearX - 24) continue;
-            const yy = ridgeTop + 14 + t * (ridgeH / 28) + Math.sin(t * 0.55) * 1.4;
-            if (yy > snowBottom - 6) break;
-            if (!started) { cx.moveTo(x, yy); started = true; }
-            else cx.lineTo(x, yy);
-          }
-          if (started) cx.stroke();
-        }
-        // Small rocks / ice chunks — never under the JUMP button
-        const nRock = tallPhone ? 11 : 5;
-        for (let i = 0; i < nRock; i++) {
-          const span = Math.max(40, jumpClearX - viewL - 56);
-          const rx = viewL + 36 + ((i * 89 + Math.floor(S.dist * 0.07)) % span);
-          if (rx > jumpClearX - 18) continue;
-          const ry = ridgeTop + 16 + (i % 5) * (ridgeH * 0.14) + Math.sin(i * 2.1) * 5;
-          if (ry > snowBottom - 10) continue;
-          cx.fillStyle = i % 2 ? "#7a6a88" : "#8e7e9a";
-          cx.beginPath();
-          cx.ellipse(rx, ry, 4.5 + (i % 3), 2.6 + (i % 2), (i * 0.4) % 1, 0, 7);
-          cx.fill();
-          cx.fillStyle = "rgba(255,255,255,0.4)";
-          cx.fillRect(rx - 1.6, ry - 1.6, 2.4, 1.5);
-        }
         fgDbg.push({ x: viewL, y: ridgeTop, w: Math.min(80, viewR - viewL), h: ridgeH, k: "bank" });
       }
-      cx.save();
-      cx.beginPath();
-      cx.rect(viewL, snowFloor - 14, viewR - viewL, 16);
-      cx.clip();
-      // Sparse clipped treetops only (vector near-bank) — not a dense row.
-      const tipPer = 160; const tipOff = (S.dist * 0.4) % tipPer;
-      for (let i = 0; i < 3; i++) {
-        const x = 50 + i * tipPer - tipOff;
-        if (x < viewL || x > viewR) continue;
-        pine(x, snowFloor + 36, 0.42, "near", false);
-        fgDbg.push({ x: x - 10, y: snowFloor - 14, w: 20, h: 14, k: "treetop" });
-      }
-      cx.restore();
     }
     // Features always ABOVE mid trees and any foreground bank.
     for (const f of S.feats) drawFeat(f);
@@ -2520,19 +2754,34 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       cx.beginPath(); cx.arc(-5, -3, 5.5, 0, 7); cx.arc(5, -3, 5.5, 0, 7); cx.lineTo(0, 12); cx.fill();
       cx.restore();
     }
-    // Falling snow flakes (varied size/depth). Wind only drifts them — no streak lines.
+    // Falling snow — soft round dots, 2–4 CSS px diameter, varied alpha (no squares).
     {
       cx.save();
       for (const fl of S.flakes) {
-        cx.globalAlpha = 0.35 + fl.z * 0.4;
+        const diamCss = 2 + fl.z * 2; // 2–4 CSS px
+        const radWu = Math.max(0.8, (diamCss * 0.5 * dpr) / Math.max(1e-6, scale));
+        cx.globalAlpha = 0.28 + fl.z * 0.45;
         cx.fillStyle = "#ffffff";
-        const s = fl.r * (0.7 + fl.z * 0.6);
-        cx.fillRect(fl.x, fl.y, s, s);
+        cx.beginPath();
+        cx.arc(fl.x, fl.y, radWu, 0, Math.PI * 2);
+        cx.fill();
       }
       cx.restore();
     }
     drawRider();
-    for (const P of S.parts) { cx.globalAlpha = Math.min(1, P.l * 2.5); cx.fillStyle = P.c; cx.fillRect(P.x, P.y, P.s, P.s); }
+    for (const P of S.parts) {
+      cx.globalAlpha = Math.min(1, P.l * 2.5);
+      cx.fillStyle = P.c;
+      // Soft round spray for snow-colored puffs; keep rects for other FX.
+      const snowy = typeof P.c === "string" && (P.c[0] === "#" ? parseInt(P.c.slice(1, 3), 16) > 200 : /f[0-9a-f]|white|rgb\(24/i.test(P.c));
+      if (snowy) {
+        cx.beginPath();
+        cx.arc(P.x, P.y, Math.max(0.9, P.s * 0.55), 0, Math.PI * 2);
+        cx.fill();
+      } else {
+        cx.fillRect(P.x, P.y, P.s, P.s);
+      }
+    }
     cx.globalAlpha = 1;
     if (S.flash > 0 && !reduce) { cx.fillStyle = "rgba(255,230,120," + S.flash * 1.5 + ")"; cx.fillRect(viewL, -OY, viewR - viewL, worldH); }
     if (S.flash < 0) { cx.fillStyle = "rgba(190,225,255," + -S.flash + ")"; cx.fillRect(viewL, -OY, viewR - viewL, worldH); S.flash = Math.min(0, S.flash + 0.012); }
@@ -2557,9 +2806,12 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     cx.fillStyle = "#0007"; cx.fillRect(12, 30 + hy, barW, 8);
     cx.fillStyle = stNow >= 3 ? "#ffb84a" : S.trickDone ? "#3ecf9a" : "#7fe0d0";
     cx.fillRect(12, 30 + hy, barW * prog, 8);
-    cx.fillStyle = "#fff"; cx.font = "600 11px system-ui, sans-serif";
-    const barTxt = (tg ? tg.lab + (S.trickDone ? " ✓" : "") : "Line") + "  ·  " + board().name + "  ·  " + scNow + "/" + LV.s3;
-    cx.fillText(barTxt, 12, 52 + hy);
+    // Hide goal/board subtitle while wipeout/clear card is up so it doesn't collide.
+    if (S.mode !== "over" && S.mode !== "clear") {
+      cx.fillStyle = "#fff"; cx.font = "600 11px system-ui, sans-serif";
+      const barTxt = (tg ? tg.lab + (S.trickDone ? " ✓" : "") : "Line") + "  ·  " + board().name + "  ·  " + scNow + "/" + LV.s3;
+      cx.fillText(barTxt, 12, 52 + hy);
+    }
     if (S.achT > 0) { cx.fillStyle = "#ffb84a"; cx.font = "700 12px system-ui, sans-serif"; cx.fillText(S.achToast, 12, 66 + hy); }
 
     // Trick pops in CSS-pixel space — stacked vertically so GOAL never overlaps trick names.
@@ -2679,7 +2931,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       showNext: m === "clear" && !LV.endless,
       showResume: !menu && !leg && m === "pause",
       hint: m === "ready" && !hintSeen
-        ? "Riding " + board().name + ". Hold to spin, swipe for grabs & rail tricks. " + (tg?.lab || "") + "."
+        ? "Riding " + board().name + ". Hold to flip, tap in the air to spin. Swipe for grabs & rail tricks. " + (tg?.lab || "") + "."
         : null,
       showLegend: leg, pb, careerStars: careerFromBest(), diffId: diff().id,
       diffs: Object.values(DIFFS),
@@ -2710,7 +2962,18 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       if (!hintSeen) { hintSeen = true; store("terrainPark.hint", "1"); }
       S.mode = "play"; S.playAt = performance.now(); emit(true); return;
     }
-    if (S.mode === "play") { if (performance.now() - (S.playAt || 0) < 160) return; jump(); return; }
+    if (S.mode === "play") {
+      if (performance.now() - (S.playAt || 0) < 160) return;
+      pressAt = performance.now();
+      pressArmed = true;
+      pressJumped = false;
+      // Ground/grind takeoff immediately. Air actions resolve on release (tap) or after TAP_MS (hold flip).
+      if (S.p.on || S.grindOn) {
+        jump();
+        pressJumped = true;
+      }
+      return;
+    }
     if (S.mode === "pause") { S.mode = "play"; emit(true); return; }
   }
   function replayLine() {
@@ -2727,9 +2990,22 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     else openMenu();
   }
   function hold(v: boolean) {
-    S.holding = !!v;
+    if (v) {
+      // Finger down — flip only engages after TAP_MS (see step). UI may call hold(true) before press().
+      pressArmed = true;
+      if (!pressAt) pressAt = performance.now();
+      return;
+    }
+    // Finger up: short air press = tap (boost / half-turn). Long press = hold flip release.
+    const dur = performance.now() - pressAt;
+    const wasHold = S.holding || dur > TAP_MS;
+    S.holding = false;
+    pressArmed = false;
+    if (!wasHold && !pressJumped && !S.p.on && !S.grindOn) airTap();
+    pressJumped = false;
+    pressAt = 0;
     // Release grab before landing — ease-out starts when the finger lifts.
-    if (!v && S.grab) S.grabHeld = false;
+    if (S.grab) S.grabHeld = false;
   }
   function togglePause() {
     if (S.mode === "play") { S.mode = "pause"; scrapeStop(); }
@@ -2825,11 +3101,15 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     state: () => S,
     step,
     jump,
+    airTap,
     hold,
     aim,
     setLives: (n: number) => { lives = n; },
     setGod: (g: boolean) => { god = g; },
-    consts: { AIR, SPIN, LIP_WIN, POST_LIP, GRAVITY, JV, DIFFS, LEN_MUL },
+    consts: {
+      AIR, SPIN, LIP_WIN, POST_LIP, GRAVITY, JV, DIFFS, LEN_MUL,
+      AIR_BOOST_FRAC, TAP_MS, SPIN_LAND_WIN_DEG, SPIN_NO_DEG, SPIN_TIERS_DEG, SPIN_PTS, TAP_SPIN_HALF, YAW_MAX,
+    },
     starsFor,
     lineLength,
     score,
@@ -2875,6 +3155,27 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     },
     setGrindStyle(st: GrindStyle) { S.grindStyle = st; },
     setSpinDir(d: number) { S.spinDir = d >= 0 ? 1 : -1; },
+    /** Air-spin bookkeeping for Playwright fail-tests / evidence. */
+    getSpinState: () => ({
+      flip: S.flip,
+      flipDeg: Math.abs(S.flip) * (180 / Math.PI),
+      yaw: S.yaw,
+      yawDeg: Math.abs(S.yaw) * (180 / Math.PI),
+      airBoostUsed: S.airBoostUsed,
+      flipBucket: spinBucket(Math.abs(S.flip)),
+      yawBucket: spinBucket(Math.abs(S.yaw)),
+      holding: S.holding,
+      pressArmed,
+      on: S.p.on,
+      mode: S.mode,
+      lives,
+      flipPts: S.flipPts,
+      lastTrickName: S.lastTrickName,
+    }),
+    /** Force absolute flip / yaw radians (tests). */
+    setFlip(rad: number) { S.flip = rad; },
+    setYaw(rad: number) { S.yaw = rad; },
+    setAirBoostUsed(v: boolean) { S.airBoostUsed = !!v; },
     /** Draw pose QA sheet (grabs / rails / spins) for evidence screenshots. */
     renderPoseSheet() { renderPoseSheet(); },
     /** World AABB → CSS-pixel screen AABB (for Playwright overlap asserts). */
@@ -2942,6 +3243,17 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       for (const gm of S.feats) {
         const d = FEAT[gm.k];
         if (!d?.mob) continue;
+        // Sit groms are allowed on flat/box deck edges + soft runouts.
+        if (gm.k === "grom" && gm.pose === "sit") {
+          const host = S.feats.find((f) => {
+            if (FEAT[f.k]?.mob) return false;
+            if (f.k === "flat") return Math.abs(f.wx - gm.wx) < (f.dk || 40) + 40;
+            if (f.k === "box" || f.k === "log") return Math.abs(f.wx - gm.wx) < (f.w || 80) * 0.6 + 20;
+            return false;
+          }) || null;
+          if (sitSafe(gm.wx, gm.w || d.w, host)) continue;
+          return true;
+        }
         if (!trafficSafe(gm.wx, gm.w || d.w)) return true;
       }
       return false;

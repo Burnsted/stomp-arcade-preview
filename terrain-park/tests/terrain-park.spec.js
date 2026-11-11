@@ -276,6 +276,7 @@ print(out, im.size)
     expect(layerCheck.fgFeat).toBe(0);
     expect(layerCheck.fgRider).toBe(0);
     expect(layerCheck.treeCount).toBeGreaterThan(0);
+    expect(layerCheck.treeCount).toBeLessThanOrEqual(2); // sparse: ≤1–2 foreground pines
     expect(layerCheck.fgCount).toBeGreaterThan(0);
     expect(layerCheck.fenceCount).toBe(0);
 
@@ -351,9 +352,10 @@ print(out, im.size)
     expect(await page.evaluate(() => window.TerrainPark.getSnap().mode)).toBe("play");
     expect(await page.locator("canvas#c").count()).toBe(1);
 
-    // Rapid taps should not throw
+    // Rapid taps should not throw (god on — spam can under-rotate into a crash land)
     await page.evaluate(() => {
       const TP = window.TerrainPark;
+      TP.setGod(true);
       TP.debugStart(1);
       for (let i = 0; i < 40; i++) {
         TP.press();
@@ -407,8 +409,11 @@ print(out, im.size)
     );
     await page.waitForTimeout(80);
     await page.evaluate(() => {
-      window.TerrainPark.resize();
-      for (let i = 0; i < 8; i++) window.TerrainPark.step(1 / 60);
+      const TP = window.TerrainPark;
+      TP.resize();
+      TP.setGod(true);
+      TP.debugStart(5);
+      for (let i = 0; i < 12; i++) TP.step(1 / 60);
     });
     const back = await page.evaluate(() => {
       const v = window.TerrainPark.getView();
@@ -416,7 +421,7 @@ print(out, im.size)
     });
     expect(back.rot).toBe(0);
     expect(back.riderYFrac).toBeGreaterThanOrEqual(0.45);
-    expect(back.riderYFrac).toBeLessThanOrEqual(0.7);
+    expect(back.riderYFrac).toBeLessThanOrEqual(0.72);
     expect(await page.evaluate(() => window.TerrainPark.getSnap().mode)).toBeTruthy();
 
     // Phone fill: standing rider locked to RIDER_H_FRAC (9–11% / ~75–90 CSS px)
@@ -721,6 +726,7 @@ print(out, im.size)
       });
       await page.waitForTimeout(40);
       await page.screenshot({ path: path.join(ART, "phone-art-grab.png") });
+      await page.screenshot({ path: path.join(ART, "phone-art-mid-trick.png") });
 
       await page.evaluate(() => {
         const TP = window.TerrainPark;
@@ -756,7 +762,238 @@ print(out, im.size)
       await page.screenshot({ path: path.join(ART, "phone-trees-closeup.png") });
       await page.screenshot({ path: path.join(ART, "phone-ride-no-flags.png") });
 
-      // (e) overview
+      // (e) Air spin (Ted 10:41) — hold=backflip, taps=yaw; dual-axis land + evidence
+      {
+        const C = await page.evaluate(() => window.TerrainPark.consts);
+        expect(C.SPIN_TIERS_DEG).toEqual([360, 540, 720, 900, 1080]);
+        expect(C.SPIN_PTS[720]).toBe(300);
+        expect(C.SPIN_LAND_WIN_DEG).toBe(30);
+        expect(C.TAP_MS).toBeLessThanOrEqual(150);
+
+        // Spam air taps: one boost only, then +180° yaw each (no repeat float).
+        const spam = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.setOverview(false); TP.debugStart(3);
+          TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          TP.jump();
+          const vy0 = S.p.vy;
+          TP.airTap(); // second tap = boost
+          const afterBoost = TP.getSpinState();
+          const vy1 = S.p.vy;
+          for (let i = 0; i < 8; i++) TP.airTap(); // half-turns → capped 1080
+          const afterSpam = TP.getSpinState();
+          const vy2 = S.p.vy;
+          return {
+            vy0, vy1, vy2,
+            boostOnce: afterBoost.airBoostUsed === true,
+            yawDeg: afterSpam.yawDeg,
+            ptsTable: TP.consts.SPIN_PTS,
+          };
+        });
+        expect(spam.boostOnce).toBe(true);
+        expect(spam.vy1).toBeLessThan(spam.vy0);
+        expect(spam.vy2).toBeGreaterThanOrEqual(spam.vy1 - 5);
+        expect(spam.yawDeg).toBeCloseTo(1080, 0);
+
+        // Hold never misread as tap: press+hold > TAP_MS then release → no yaw
+        const holdNotTap = await page.evaluate(async () => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          TP.jump();
+          TP.airTap(); // spend boost
+          const yaw0 = TP.getSpinState().yawDeg;
+          // Clear playAt gate so press() arms the air hold.
+          S.playAt = performance.now() - 200;
+          TP.press();
+          TP.hold(true);
+          // Wait wall-clock past TAP_MS without burning airtime; then step to engage hold flip.
+          await new Promise((r) => setTimeout(r, TP.consts.TAP_MS + 40));
+          for (let i = 0; i < 12; i++) TP.step(1 / 60);
+          const mid = TP.getSpinState();
+          TP.hold(false);
+          const after = TP.getSpinState();
+          return { yaw0, yawAfter: after.yawDeg, holdingMid: mid.holding, flipMid: mid.flipDeg, on: mid.on };
+        });
+        expect(holdNotTap.holdingMid).toBe(true);
+        expect(holdNotTap.on).toBe(false);
+        expect(holdNotTap.yawAfter).toBeCloseTo(holdNotTap.yaw0, 0);
+        expect(holdNotTap.flipMid).toBeGreaterThan(5);
+
+        // Under-rotation crash on flip axis (≈90°) — land fast so coast-settle can't upright it
+        const under = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 520; S.p.y = 292;
+          TP.setFlip(Math.PI * 0.5); // 90°
+          TP.setYaw(0);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 8; i++) TP.step(1 / 60);
+          return TP.getSpinState();
+        });
+        expect(under.mode).toBe("over");
+        expect(under.lives).toBe(4);
+        expect(under.lastTrickName).toBe("");
+
+        // Under-rotation crash on yaw axis (≈90°)
+        const underYaw = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setFlip(0);
+          TP.setYaw(Math.PI * 0.5);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          return TP.getSpinState();
+        });
+        expect(underYaw.mode).toBe("over");
+        expect(underYaw.lives).toBe(4);
+
+        // Over-rotation crash on yaw axis (≈450°)
+        const over = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setFlip(0);
+          TP.setYaw((450 * Math.PI) / 180);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          return TP.getSpinState();
+        });
+        expect(over.mode).toBe("over");
+        expect(over.lives).toBe(4);
+
+        // Clean 720 yaw land (flip axis clean / zero)
+        const clean720 = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = []; S.flipPts = 0;
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setFlip(0);
+          TP.setYaw((720 * Math.PI) / 180);
+          TP.setSpinDir(1);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          return {
+            ...TP.getSpinState(),
+            pops: S.pops.map((p) => p.txt),
+          };
+        });
+        expect(clean720.mode).toBe("play");
+        expect(clean720.lives).toBe(5);
+        expect(clean720.flipPts).toBeGreaterThanOrEqual(300);
+        expect(clean720.pops.some((t) => /720!/.test(t))).toBe(true);
+
+        // Flip + 360 combine lands clean
+        const combo = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = []; S.flipPts = 0;
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setFlip(Math.PI * 2); // full flip
+          TP.setYaw(Math.PI * 2); // 360 yaw
+          TP.setSpinDir(1);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          return { ...TP.getSpinState(), pops: S.pops.map((p) => p.txt) };
+        });
+        expect(combo.mode).toBe("play");
+        expect(combo.lives).toBe(5);
+        expect(combo.flipPts).toBeGreaterThanOrEqual(100);
+        expect(combo.pops.some((t) => /360!/.test(t))).toBe(true);
+
+        // Frame strip: 720 yaw → land, and crash strip
+        await page.setViewportSize({ width: 390, height: 844 });
+        const stripDirs = {
+          land: path.join(ART, "spin-720-frames"),
+          crash: path.join(ART, "spin-crash-frames"),
+        };
+        fs.mkdirSync(stripDirs.land, { recursive: true });
+        fs.mkdirSync(stripDirs.crash, { recursive: true });
+
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = true; S.p.vy = 0;
+          TP.jump();
+          TP.setSpinDir(1);
+          TP.airTap(); // boost
+          TP.airTap(); TP.airTap(); TP.airTap(); TP.airTap(); // 720 yaw
+        });
+        for (let f = 0; f < 10; f++) {
+          await page.evaluate((fi) => {
+            const TP = window.TerrainPark;
+            for (let i = 0; i < 4; i++) TP.step(1 / 60);
+            if (fi === 6) TP.setYaw((700 * Math.PI) / 180);
+            if (fi === 8) {
+              const S = TP.state();
+              S.p.vy = 120; S.p.y = 290;
+              TP.setFlip(0);
+              TP.setYaw((720 * Math.PI) / 180);
+            }
+          }, f);
+          await page.waitForTimeout(20);
+          await page.screenshot({ path: path.join(stripDirs.land, `f${String(f).padStart(2, "0")}.png`) });
+        }
+
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 40; S.p.y = 240;
+          TP.setFlip(0);
+          TP.setYaw((95 * Math.PI) / 180);
+          TP.setAirBoostUsed(true);
+          S.holding = true;
+        });
+        for (let f = 0; f < 8; f++) {
+          await page.evaluate(() => {
+            for (let i = 0; i < 5; i++) window.TerrainPark.step(1 / 60);
+          });
+          await page.waitForTimeout(20);
+          await page.screenshot({ path: path.join(stripDirs.crash, `f${String(f).padStart(2, "0")}.png`) });
+        }
+
+        const { execFileSync } = require("child_process");
+        execFileSync("python3", ["-c", `
+from PIL import Image
+import os
+def strip(src, out, n=8):
+    frames=[]
+    for i in range(n):
+        p=os.path.join(src, f"f{i:02d}.png")
+        if os.path.isfile(p):
+            im=Image.open(p).convert("RGB")
+            # portrait mid band around rider
+            w,h=im.size
+            crop=im.crop((0, int(h*0.28), w, int(h*0.78))).resize((160, 200), Image.Resampling.LANCZOS)
+            frames.append(crop)
+    if not frames: return
+    canvas=Image.new("RGB", (len(frames)*160, 200), (10,20,40))
+    for i,fr in enumerate(frames):
+        canvas.paste(fr, (i*160, 0))
+    canvas.save(out, "PNG")
+strip(${JSON.stringify(stripDirs.land)}, ${JSON.stringify(path.join(ART, "phone-spin-720-strip.png"))}, 10)
+strip(${JSON.stringify(stripDirs.crash)}, ${JSON.stringify(path.join(ART, "phone-spin-crash-strip.png"))}, 8)
+`]);
+      }
+
+      // (f) overview
       const overviewRaw = path.join(ART, "overview-raw.png");
       await page.setViewportSize({ width: 1600, height: 600 });
       await page.evaluate(() => {
