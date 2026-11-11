@@ -44,11 +44,20 @@ canvas{display:block;width:100%;height:100%}
 <script>
 (function(){
 'use strict';
-var VER='0.9.13-rebuild';
+var VER='0.9.18-airspin';
 var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 var W=390,H=844,scale=1,OY=0,dpr=1;
 var GROUND=268,G=3400,JV=-980,DT=1/120;
 var COYOTE=0.09,BUFFER=0.11,HOLD_CUT=0.62;
+/* Air spin — taps only; half-turns, max 720; finish in a normal fall (raise rate, not height) */
+var SPIN_HALF=180,SPIN_MAX=720,SPIN_TOL=30;
+var SPIN_LIFT=Math.round(Math.abs(JV)*0.18); /* once/airtime · ~18% of jump impulse */
+var SPIN_RATE=(SPIN_MAX*Math.PI/180)/0.42; /* rad/s — 720° inside normal hang */
+var SPIN_PTS={360:100,540:150,720:300};
+/* Hold-to-flip matches Terrain Park; tap ≤TAP_MS so holds are never spins. No lift from hold. */
+var TAP_MS=150,FLIP_RATE=11.2,FLIP_TOL=SPIN_TOL*Math.PI/180;
+/* Apex: rider (head) never above 35% of screen from top / never under HUD */
+var APEX_TOP_FRAC=0.35,APEX_HUD_PAD=96;
 var BPM=128,BEAT=60/BPM,SPD=350;
 var TER=[1.1,2.4,0.7];
 /* Standing rider+board as fraction of playfield height (9–11%). Single scale lock — never grow for detail. */
@@ -212,9 +221,10 @@ function paintRiderArt(pose,t){
   cx.save();
   /* bob only in air — on snow the board stays planted on the surface line */
   if(pose.air&&name!=='crash')cx.translate(0,Math.sin(t*5)*0.1);
-  /* crash sprite already posed — light tip only */
+  /* crash tip in local space, then mirror so all poses face travel (right) */
   if(name==='crash')cx.rotate(Math.min(0.35,(S.crashT||0)*0.6));
-  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
+  /* Atlas faces left: flip around sprite center via negative dest width */
+  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,a.w/2,-a.h,-a.w,a.h);
   cx.restore();
   return true;
 }
@@ -395,29 +405,100 @@ function reset(keepAttempts){
   ensureBackdrop(curLevel().bg);
   preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   var rx=rideX();
-  S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0};
+  S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0,
+    spinDeg:0,spinTarget:0,spinBoost:false,spinActive:false,trickPts:0,
+    flip:0,flipHold:false,pressAt:0,pressArmed:false,pressFromGround:false};
   /* plant board exactly on surface line after restart */
   S.p.y=gY(S.p.x);S.p.on=true;S.p.vy=0;
   stopMusic();syncUI();
 }
-function score(){return Math.floor(S.dist/10)+S.cleared*25+(S.done?250:0);}
+function score(){return Math.floor(S.dist/10)+S.cleared*25+S.trickPts+(S.done?250:0);}
+function clearSpin(){S.spinDeg=0;S.spinTarget=0;S.spinBoost=false;S.spinActive=false;}
+function clearFlip(){S.flip=0;S.flipHold=false;}
+function clearTricks(){clearSpin();clearFlip();}
+function spinTier(deg){
+  var d=Math.abs(deg),best=0;
+  if(d>=720-SPIN_TOL)best=720;else if(d>=540-SPIN_TOL)best=540;else if(d>=360-SPIN_TOL)best=360;
+  return best;
+}
+function spinLandingClean(deg){
+  /* ±30° of a half or full turn (0 / 180 within a circle) */
+  var a=((deg%360)+360)%360;
+  var d0=Math.min(a,360-a),d180=Math.abs(a-180);
+  return d0<=SPIN_TOL||d180<=SPIN_TOL;
+}
+function flipLandingClean(rad){
+  /* Backflips land upright — ±SPIN_TOL of 0° (TP-style, tighter tol) */
+  var rem=((rad%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+  return Math.min(rem,Math.PI*2-rem)<=FLIP_TOL;
+}
+/* Ground / coyote jump only — air spins come from short taps on release */
 function jump(){
   if(S.mode!=='play')return;
-  if(S.p.on||S.coyote>0){S.p.vy=JV;S.p.on=false;S.coyote=0;S.buf=0;S.holding=true;jumpSFX();return;}
-  S.buf=BUFFER;
+  if(!(S.p.on||S.coyote>0))return;
+  S.p.vy=JV;S.p.on=false;S.coyote=0;S.buf=0;S.holding=true;clearTricks();jumpSFX();
 }
-function holdSet(v){S.holding=!!v;if(!v&&S.p.vy<0)S.p.vy*=HOLD_CUT;}
+/* Air tap (press≤TAP_MS): half-turn spin + one lift per airtime */
+function spinTap(){
+  if(S.mode!=='play'||S.p.on)return;
+  if(!S.spinBoost){S.spinBoost=true;S.p.vy-=SPIN_LIFT;}
+  if(S.spinTarget<SPIN_MAX){
+    S.spinTarget=Math.min(SPIN_MAX,S.spinTarget+SPIN_HALF);
+    S.spinActive=true;
+    beep(660+S.spinTarget*0.4,.04,'square',.05);
+  }
+}
+function holdSet(v){
+  S.holding=!!v;
+  if(!v){
+    S.flipHold=false;
+    if(S.p.vy<0)S.p.vy*=HOLD_CUT;
+  }
+}
 function spawnPuff(x,y,n,col){for(var i=0;i<n;i++)S.parts.push({x:x,y:y,vx:(Math.random()-.5)*140,vy:-50-Math.random()*90,l:.35+Math.random()*0.45,c:col||'#fff'});}
 function crash(why){
   if(S.mode!=='play')return;
-  S.mode='over';S.fail=why||'Wipeout';S.pop=null;S.flash=-.2;S.crashT=0;crashSFX();stopMusic();spawnPuff(S.p.x,S.p.y-10,22,'#fff');
+  S.mode='over';S.fail=why||'Wipeout';S.pop=null;S.flash=-.2;S.crashT=0;clearTricks();S.pressArmed=false;
+  /* Pin crash body to slope surface at rider x — never bury under snow */
+  S.p.y=gY(S.p.x);S.p.vy=0;S.p.on=true;
+  crashSFX();stopMusic();spawnPuff(S.p.x,S.p.y-10,22,'#fff');
   var sc=score();if(sc>pb){pb=sc;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
   setTimeout(function(){if(S.mode==='over'){attempts++;reset(true);S.mode='play';startMusic();syncUI();}},260);
+}
+/* World-y floor for board so rider head stays ≤35% from top and clear of HUD */
+function apexFloorY(){
+  var screenTop=-OY;
+  var ceil=Math.max(screenTop+H*APEX_TOP_FRAC,screenTop+APEX_HUD_PAD);
+  return ceil+worldRiderH()*0.9;
+}
+function clampApex(){
+  var floor=apexFloorY();
+  if(S.p.y<floor){S.p.y=floor;if(S.p.vy<0)S.p.vy=0;}
+}
+function landFromAir(){
+  var p=S.p;
+  /* Either axis off → crash (flip upright; spin half/full) */
+  if(S.flip>FLIP_TOL){
+    if(!flipLandingClean(S.flip)){crash('Bad flip');return false;}
+  }
+  if(S.spinActive||S.spinTarget>0||Math.abs(S.spinDeg)>8){
+    if(!spinLandingClean(S.spinDeg)){crash('Bad spin');return false;}
+    var tier=spinTier(S.spinDeg);
+    if(tier&&SPIN_PTS[tier]){
+      S.trickPts+=SPIN_PTS[tier];
+      S.pop={txt:tier+'!',l:0.95};
+      beep(880,.05,'triangle',.07);beep(1180,.06,'square',.05);
+    }
+  }
+  clearTricks();
+  p.y=gY(p.x);p.vy=0;p.on=true;S.landT=.2;landSFX();spawnPuff(p.x,p.y,8,'#e8f2fb');
+  return true;
 }
 
 function step(dt){
   if(S.mode!=='play'&&S.mode!=='over')return;
-  if(S.mode==='over'){S.crashT=(S.crashT||0)+dt;S.p.vy+=G*0.35*dt;S.p.y+=S.p.vy*dt*0.35;return;}
+  /* Crash: keep body planted on surface at rider x (no post-crash sink) */
+  if(S.mode==='over'){S.crashT=(S.crashT||0)+dt;S.p.y=gY(S.p.x);S.p.vy=0;S.p.on=true;return;}
   S.t+=dt;S.landT=Math.max(0,S.landT-dt);S.pulse=Math.max(0,S.pulse-dt*3);S.nearT=Math.max(0,S.nearT-dt);
   if(S.flash<0)S.flash=Math.min(0,S.flash+dt);
   if(S.pop){S.pop.l-=dt;if(S.pop.l<=0)S.pop=null;}
@@ -425,9 +506,19 @@ function step(dt){
   if(p.on){S.coyote=COYOTE;p.y=gy;p.vy=0;}
   else{
     S.coyote=Math.max(0,S.coyote-dt);
-    var grav=G;if(S.holding&&p.vy<0)grav*=.55;
-    p.vy+=grav*dt;p.y+=p.vy*dt;
-    if(p.y>=gy&&p.vy>=0){p.y=gy;p.vy=0;p.on=true;S.landT=.2;landSFX();spawnPuff(p.x,p.y,8,'#e8f2fb');if(S.buf>0){S.buf=0;jump();}}
+    /* Hold-to-flip adds NO lift — full gravity always (height only via HOLD_CUT on early release) */
+    p.vy+=G*dt;p.y+=p.vy*dt;
+    clampApex();
+    /* Hold past TAP_MS → backflip. Spins only from short air taps. */
+    if(S.pressArmed&&(performance.now()-S.pressAt)>=TAP_MS)S.flipHold=true;
+    if(S.flipHold)S.flip+=FLIP_RATE*dt;
+    /* Advance spin toward target (deg) — rate sized so 720 finishes in a normal hang */
+    if(S.spinActive&&S.spinDeg<S.spinTarget){
+      S.spinDeg=Math.min(S.spinTarget,S.spinDeg+SPIN_RATE*dt*(180/Math.PI));
+    }
+    if(p.y>=gy&&p.vy>=0){
+      if(!landFromAir())return;
+    }
   }
   S.buf=Math.max(0,S.buf-dt);
   S.dist+=SPD*dt;
@@ -447,7 +538,13 @@ function step(dt){
       continue;
     }
     if(o.k==='kicker'){
-      if(ox<p.x+18&&ox+o.w*0.55>p.x&&p.on){p.on=false;p.vy=JV*1.08;S.holding=true;jumpSFX();spawnPuff(p.x,p.y,5,'#fff');}
+      if(ox<p.x+18&&ox+o.w*0.55>p.x&&p.on){
+        p.on=false;p.vy=JV*1.08;clearTricks();
+        /* keep hold-to-flip if finger already down; else no auto-flip */
+        if(S.pressArmed){S.holding=true;S.pressAt=performance.now();S.pressFromGround=true;}
+        else S.holding=false;
+        jumpSFX();spawnPuff(p.x,p.y,5,'#fff');
+      }
       continue;
     }
     if(o.k==='coyote'||o.k==='grom'){
@@ -574,9 +671,13 @@ function draw(){
   });
 
   /* plant board onto surface line; light slope tip only (big rotate lifts the deck visually) */
-  if(p.on)p.y=gY(p.x);
-  var plant=p.on?1.0:0;
-  cx.save();cx.translate(p.x,p.y+plant);cx.rotate(p.on?slopeAt(p.x)*0.08:0);if(S.landT>0)cx.scale(1+0.05*S.landT,1-0.08*S.landT);paintRider(poseFor(),S.t);cx.restore();
+  /* Spin/flip visual-only — hitbox stays axis-aligned at (p.x,p.y). Crash stays on surface. */
+  if(p.on||S.mode==='over')p.y=gY(p.x);
+  var plant=(p.on||S.mode==='over')?1.0:0;
+  cx.save();cx.translate(p.x,p.y+plant);cx.rotate((p.on||S.mode==='over')?slopeAt(p.x)*0.08:0);
+  /* Compose flip (hold) + spin (tap) — visual only; hitbox stays put */
+  if(!p.on&&S.mode==='play'){var airRot=(S.flip||0)+(S.spinDeg||0)*Math.PI/180;if(airRot)cx.rotate(airRot);}
+  if(S.landT>0)cx.scale(1+0.05*S.landT,1-0.08*S.landT);paintRider(poseFor(),S.t);cx.restore();
   S.parts.forEach(function(q){cx.globalAlpha=Math.max(0,q.l*2);cx.fillStyle=q.c;cx.fillRect(q.x,q.y,3.5,3.5);});cx.globalAlpha=1;
   if(S.pulse>0){cx.fillStyle='rgba(232,119,46,'+(S.pulse*0.07)+')';cx.fillRect(-30,-OY,W+60,90);}
   if(S.flash<0){cx.fillStyle='rgba(180,220,255,'+(-S.flash)+')';cx.fillRect(-30,-OY,W+60,H);}
@@ -642,7 +743,7 @@ function openMenu(){
   var el=document.getElementById('menu');el.style.display='block';
   var lv=curLevel();
   if(menuSheet==='how'){
-    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>One-button JUMP — hold for height</li><li>Coyote time + buffer for fair taps</li><li>Kickers launch you — air-dodge rocks</li><li>Wipeout restarts in under 300ms</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
+    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>JUMP — hold in air to backflip (TP-style)</li><li>Quick air taps (≤150ms) spin — half-turns, max 720</li><li>Land clean on both axes (±30°) or wipeout</li><li>Kickers launch you — air-dodge rocks</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
   }else if(menuSheet==='levels'){
     var rows=LEVELS.map(function(L,i){return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+'</b> — resort backdrop</p>';}).join('');
     el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same chart; one backdrop per level.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
@@ -662,12 +763,36 @@ function frame(ts){
 
 function canvasPress(e){
   e.preventDefault();ensureAC();
-  if(S.mode==='ready'){S.mode='play';startMusic();syncUI();jump();return;}
+  if(S.mode==='ready'){S.mode='play';startMusic();syncUI();beginPress();return;}
   if(S.mode==='clear'){setLevel(levelIdx+1);attempts=0;reset(false);S.mode='play';startMusic();syncUI();return;}
   if(S.mode==='pause'){S.mode='play';startMusic();return;}
-  jump();
+  beginPress();
 }
-function canvasRelease(){holdSet(false);}
+/* Press/release gate: ≤TAP_MS air release = spin tap; longer hold = flip */
+function beginPress(){
+  if(S.mode!=='play')return;
+  S.pressAt=performance.now();
+  S.pressArmed=true;
+  S.flipHold=false;
+  if(S.p.on||S.coyote>0){
+    S.pressFromGround=true;
+    jump();
+  }else{
+    S.pressFromGround=false;
+    S.holding=true; /* may become flip after TAP_MS; never a spin until short release */
+  }
+}
+function canvasRelease(){
+  if(!S||S.mode!=='play'){if(S)holdSet(false);return;}
+  if(!S.pressArmed){holdSet(false);return;}
+  var dur=performance.now()-S.pressAt;
+  var fromGround=S.pressFromGround;
+  S.pressArmed=false;
+  S.pressFromGround=false;
+  /* Spins only from short air taps — holds never count as taps */
+  if(!fromGround&&!S.p.on&&dur<=TAP_MS)spinTap();
+  holdSet(false);
+}
 cv.addEventListener('pointerdown',canvasPress);cv.addEventListener('pointerup',canvasRelease);cv.addEventListener('pointercancel',canvasRelease);
 document.getElementById('jumpB').addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();canvasPress(e);});
 document.getElementById('jumpB').addEventListener('pointerup',canvasRelease);
@@ -680,8 +805,8 @@ document.getElementById('menu').addEventListener('click',function(e){
   if(b.id==='sheetBack'){menuSheet=null;openMenu();return;}
   if(b.dataset.sheet){menuSheet=b.dataset.sheet;openMenu();}
 });
-addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();canvasPress(e);}});
-addEventListener('keyup',function(e){if(e.code==='Space'||e.code==='ArrowUp')holdSet(false);});
+addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();if(!e.repeat)canvasPress(e);}});
+addEventListener('keyup',function(e){if(e.code==='Space'||e.code==='ArrowUp')canvasRelease();});
 addEventListener('resize',resize);addEventListener('orientationchange',function(){setTimeout(resize,50);});
 
 window.BoulderDodge={
@@ -693,9 +818,15 @@ window.BoulderDodge={
   start:function(){if(S.mode==='ready'){S.mode='play';startMusic();syncUI();}},
   openMenu:openMenu,getState:function(){return S.mode;},getScore:score,
   _test:{
-    state:function(){return S;},step:step,jump:jump,draw:draw,reset:reset,crash:crash,
+    state:function(){return S;},step:step,jump:jump,spinTap:spinTap,beginPress:beginPress,canvasRelease:canvasRelease,
+    holdSet:holdSet,draw:draw,reset:reset,crash:crash,
     setLevel:setLevel,curLevel:curLevel,ensureBackdrop:ensureBackdrop,
-    consts:{DT:DT,SPD:SPD,L1_LEN:L1_LEN,RIDER_H_FRAC:RIDER_H_FRAC,RIDER_LOCAL_H:RIDER_LOCAL_H},
+    clearSpin:clearSpin,clearFlip:clearFlip,clearTricks:clearTricks,
+    spinLandingClean:spinLandingClean,flipLandingClean:flipLandingClean,spinTier:spinTier,landFromAir:landFromAir,
+    consts:{DT:DT,SPD:SPD,L1_LEN:L1_LEN,RIDER_H_FRAC:RIDER_H_FRAC,RIDER_LOCAL_H:RIDER_LOCAL_H,JV:JV,G:G,
+      SPIN_HALF:SPIN_HALF,SPIN_MAX:SPIN_MAX,SPIN_TOL:SPIN_TOL,SPIN_LIFT:SPIN_LIFT,SPIN_RATE:SPIN_RATE,SPIN_PTS:SPIN_PTS,
+      TAP_MS:TAP_MS,FLIP_RATE:FLIP_RATE,FLIP_TOL:FLIP_TOL,APEX_TOP_FRAC:APEX_TOP_FRAC},
+    apexFloorY:apexFloorY,clampApex:clampApex,
     measureRider:function(){
       var playCss=innerHeight,riderCss=RIDER_H_FRAC*playCss;
       return{
