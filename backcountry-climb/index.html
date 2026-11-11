@@ -404,11 +404,81 @@ function drawSky(cx, theme){
   ]);
   cx.fillRect(0,0,PW,PH);
 }
+/** Sample top-of-image colors from a backdrop for seamless sky letterbox fills. */
+function _avgRgb(samples){
+  const n=samples.length||1;
+  const r=Math.round(samples.reduce((s,c)=>s+c[0],0)/n);
+  const g=Math.round(samples.reduce((s,c)=>s+c[1],0)/n);
+  const b=Math.round(samples.reduce((s,c)=>s+c[2],0)/n);
+  return {css:`rgb(${r},${g},${b})`, r,g,b};
+}
+/** Sample top rows (sky letterbox) and bottom rows (snowfield extension) from a backdrop. */
+function skySampleFromImg(img){
+  if(!img) return null;
+  if(img.__bcSky) return img.__bcSky;
+  try{
+    const w=img.naturalWidth||img.width||BG_NATIVE_W;
+    const h=img.naturalHeight||img.height||BG_NATIVE_H;
+    const c=document.createElement('canvas');
+    c.width=Math.max(8, w); c.height=h;
+    const x=c.getContext('2d',{willReadFrequently:true});
+    x.drawImage(img, 0, 0, w, h, 0, 0, c.width, h);
+    const d=x.getImageData(0,0,c.width,h).data;
+    const at=(u, row)=>{
+      const xi=Math.min(c.width-1, Math.max(0, Math.round(u*(c.width-1))));
+      const yi=Math.min(h-1, Math.max(0, row|0));
+      const i=(yi*c.width+xi)*4;
+      return [d[i],d[i+1],d[i+2]];
+    };
+    const topRows=[0,1,2,3];
+    const botRows=[h-1,h-2,h-3,h-4]; // bottom 4 rows — gap gradient source
+    const top=_avgRgb(topRows.map(r=>at(0.5,r)));
+    // Average across bottom 4 rows × several x samples (smooth, no streak)
+    const botSamples=[];
+    for(const row of botRows){
+      for(const u of [0.08,0.25,0.42,0.58,0.75,0.92]) botSamples.push(at(u, row));
+    }
+    const bot=_avgRgb(botSamples);
+    img.__bcSky={
+      left: _avgRgb(topRows.map(r=>at(0.08,r))).css,
+      mid: top.css,
+      right: _avgRgb(topRows.map(r=>at(0.92,r))).css,
+      top: top.css,
+      deep: top.css,
+      bot: bot.css,
+      botRgb: bot
+    };
+  }catch(e){
+    img.__bcSky={
+      left:'#6a5870', mid:'#7a6a78', right:'#5a4a68', top:'#7a6a78', deep:'#5a4a62',
+      bot:'#c9d6e4', botLeft:'#c4d2e0', botRight:'#d0dce8', botRgb:{r:201,g:214,b:228}
+    };
+  }
+  return img.__bcSky;
+}
+function fillSkyLetterbox(cx, yBottom, sky){
+  if(yBottom<=0) return;
+  const top=sky.top||sky.mid||'#7a6a78';
+  // Full-bleed sky from top-row sample — no hard band under the HUD
+  const g=cx.createLinearGradient(0,0,0,Math.max(yBottom, PH*0.2));
+  g.addColorStop(0, top);
+  g.addColorStop(1, top);
+  cx.fillStyle=g;
+  cx.fillRect(0,0,PW,yBottom);
+  const hx=cx.createLinearGradient(0,0,PW,0);
+  hx.addColorStop(0, sky.left||top);
+  hx.addColorStop(0.5, sky.mid||top);
+  hx.addColorStop(1, sky.right||top);
+  cx.globalAlpha=0.4;
+  cx.fillStyle=hx;
+  cx.fillRect(0,0,PW,yBottom);
+  cx.globalAlpha=1;
+}
 /**
- * Slow far parallax backdrop. Bottom-anchored so open snow sits behind the climb.
- * Scales uniformly to cover playfield height; tiles horizontally (seamless L/R).
- * flipX: reserved — alpenglow keeps lodge unflipped so the summit lodge reads naturally
- * on the right (ahead on the climb-right slope). Storm also unflipped for edge continuity.
+ * Slow far parallax backdrop. Tiles horizontally (seamless L/R).
+ * Landscape / storm portrait: cover-height, bottom-anchored (unchanged — already fine).
+ * Alpenglow portrait: width-fit (≤1.2×) so the summit lodge stays small/distant in the
+ * upper-middle sky band above the slope; sky above filled from the tile's top row.
  */
 function drawBackdrop(cx, ox, styleKey, opts){
   opts=opts||{};
@@ -432,18 +502,36 @@ function drawBackdrop(cx, ox, styleKey, opts){
   }
   const nw=img.naturalWidth||img.width||BG_NATIVE_W;
   const nh=img.naturalHeight||img.height||BG_NATIVE_H;
-  const sc = PH / nh; // cover height, no distortion
-  const tw = nw * sc, th = PH;
-  const y = PH - th; // bottom-anchored
+  const portrait = PH > PW;
+  // Alpenglow portrait: fit width (cap 1.2×) so lodge reads distant — not cover-height zoom
+  const alpPortrait = portrait && key==='alpenglow';
+  let sc, tw, th, y;
+  if(alpPortrait){
+    const scFit = PW / nw;
+    // Within 1.2× cap — a touch larger so the tile's snow sits closer to the run
+    sc = scFit * 1.15;
+    tw = nw * sc; th = nh * sc;
+    // Lodge ~ (0.50, 0.34) stays small in the upper sky band, above the run
+    const focusV = opts.focusV!=null ? opts.focusV : 0.34;
+    const lodgeSY = opts.lodgeSY!=null ? opts.lodgeSY : PH * 0.20;
+    y = lodgeSY - focusV * th;
+    // Tile bottom near the run; remaining gap is a smooth color gradient (no stretch)
+    const maxBottom = PH * 0.50;
+    if(y + th > maxBottom) y = maxBottom - th;
+    if(y < PH * 0.04) y = PH * 0.04;
+    const sky = skySampleFromImg(img);
+    fillSkyLetterbox(cx, Math.ceil(y)+1, sky);
+  } else {
+    sc = PH / nh; // cover height — landscape + storm portrait (unchanged)
+    tw = nw * sc; th = PH;
+    y = PH - th; // bottom-anchored
+  }
   const parallax = opts.parallax!=null ? opts.parallax : 0.045;
-  // No horizontal mirror by default — alpenglow lodge stays right and reads as
-  // summit-ahead on the climb-right slope (mirroring would flip lit windows awkwardly).
-  const flipX = !!opts.flipX;
-  // Keep landmark (lodge ~0.72 in alpenglow) near screen right while parallax scrolls.
-  const focusU = opts.focusU!=null ? opts.focusU : (key==='alpenglow' ? 0.72 : 0.5);
-  // Keep target within one tile so wide landscape frames still show the lodge.
+  const flipX = !!opts.flipX; // default false — lodge stays natural
+  // Alpenglow lodge ~0.49u (v1b); keep near mid-right of portrait while scrolling
+  const focusU = opts.focusU!=null ? opts.focusU : (key==='alpenglow' ? 0.50 : 0.5);
   const targetSX = opts.targetSX!=null ? opts.targetSX
-    : Math.min(PW*(key==='alpenglow' ? 0.68 : 0.5), tw*0.82);
+    : Math.min(PW*(key==='alpenglow' ? 0.58 : 0.5), tw*0.82);
   const shift=((ox*parallax - targetSX + focusU*tw)%tw+tw)%tw;
   for(let x=-shift-tw; x<PW+tw; x+=tw){
     if(flipX){
@@ -456,14 +544,47 @@ function drawBackdrop(cx, ox, styleKey, opts){
       cx.drawImage(img, x, y, tw, th);
     }
   }
+  // Soft blends (alpenglow portrait): top → sky letterbox; bottom → smooth color bridge
+  if(alpPortrait){
+    const sky=skySampleFromImg(img);
+    if(y>2){
+      const fade=Math.min(36, th*0.12);
+      const g=cx.createLinearGradient(0, y-1, 0, y+fade);
+      g.addColorStop(0, sky.top||sky.mid);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      cx.fillStyle=g;
+      cx.fillRect(0, y-1, PW, fade+1);
+    }
+    // Smooth vertical gradient from averaged bottom-4-row color → climb snow.
+    // Overlaps the tile by 40px (alpha feather) — no pixel stretch, no left rects.
+    const tileBot = y + th;
+    // Carry the snow end of the gradient under the lip (softens left wedge without a rect)
+    const gapBot = Math.min(PH * 0.64, CTRL_TOP - 4);
+    const feather = 40;
+    const br = sky.botRgb || {r:200, g:210, b:220};
+    const snow = {r:238, g:246, b:251}; // matches C.snow / climb surface
+    const gTop = tileBot - feather;
+    const gBot = gapBot;
+    if(gBot > gTop){
+      const tFeather = Math.min(0.35, feather / (gBot - gTop));
+      const hg = cx.createLinearGradient(0, gTop, 0, gBot);
+      // Alpha-feather over the tile bottom, then bottom-avg → climb snow (no stretch)
+      hg.addColorStop(0, `rgba(${br.r},${br.g},${br.b},0)`);
+      hg.addColorStop(tFeather, `rgba(${br.r},${br.g},${br.b},1)`);
+      hg.addColorStop(Math.min(0.85, tFeather + 0.35),
+        `rgba(${Math.round(br.r*0.45+snow.r*0.55)},${Math.round(br.g*0.45+snow.g*0.55)},${Math.round(br.b*0.45+snow.b*0.55)},1)`);
+      hg.addColorStop(1, `rgba(${snow.r},${snow.g},${snow.b},1)`);
+      cx.fillStyle = hg;
+      cx.fillRect(0, gTop, PW, gBot - gTop);
+    }
+  }
 }
-/** Convenience: sky underlay (hidden when opaque backdrop present) + backdrop for a shot. */
+/** Convenience: sky underlay + backdrop for a shot. */
 function drawWorldBg(cx, ox, shotId, theme){
   const key = resolveBackdropKey(shotId);
   const has = !!(BG[key] || BG.storm);
   if(!has) drawSky(cx, theme||{});
   else {
-    // thin sky wash behind in case of letterbox (shouldn't show with cover-height)
     cx.fillStyle=(theme&&theme.sky0)||C.sky0;
     cx.fillRect(0,0,PW,PH);
   }
@@ -537,6 +658,7 @@ function drawUphillSnow(cx, base, amp, theme, xRange){
 
 /**
  * Electric sled + rider. On-screen size = atlas native × ART_SCALE.
+ * Atlas sled/rider face left — mirror with scale(-1,1) so both face uphill (climb-right).
  * Pitch to terrain/body angle; CAM_ROT stays 0 (only the vehicle rotates).
  */
 function drawSled(cx, x, y, ang, opts){
@@ -544,6 +666,8 @@ function drawSled(cx, x, y, ang, opts){
   const poseName = (opts.pose==='stand' || opts.pose==='air') ? 'air' : 'ride';
   const sink = opts.noShadow ? 0 : (opts.sink!=null ? opts.sink : HUMAN_PX*0.025);
   const gy = y + sink;
+  // Default climb-right; opts.faceRight===false only for rare downhill-facing beats
+  const faceRight = opts.faceRight!==false;
   if(!opts.noShadow){
     const sw = hitSize('sled').w;
     contactShadow(cx, x, y, sw*0.48, Math.max(4, HUMAN_PX*0.055));
@@ -555,19 +679,21 @@ function drawSled(cx, x, y, ang, opts){
     cx.save();
     cx.translate(x, gy);
     cx.rotate(ang||0);
-    // Face right with negative width — preserves terrain pitch sign (no scale(-1)).
-    cx.drawImage(ART.world.img, sf.x, sf.y, sf.w, sf.h, sw/2, -sh, -sw, sh);
+    if(faceRight) cx.scale(-1, 1); // atlas faces left → uphill/right
+    // Positive draw sizes; mirror via CTM so sled + rider stay locked together
+    cx.drawImage(ART.world.img, sf.x, sf.y, sf.w, sf.h, -sw/2, -sh, sw, sh);
     const seatY = -sh * 0.42;
-    cx.drawImage(ART.rider.img, rf.x, rf.y, rf.w, rf.h, rw/2 - sw*0.02, seatY - rh*0.72, -rw, rh);
+    cx.drawImage(ART.rider.img, rf.x, rf.y, rf.w, rf.h, -rw/2 - sw*0.02, seatY - rh*0.72, rw, rh);
     cx.restore();
     return;
   }
-  // --- vector fallback ---
+  // --- vector fallback (drawn nose-right already) ---
   const s = opts.scale || SLED_SCALE;
   const nose = Math.max(0, Math.min(0.18, opts.nose||0));
   cx.save();
   cx.translate(x, gy);
   cx.rotate(ang||0);
+  if(!faceRight) cx.scale(-1, 1);
   cx.scale(s, s);
   cx.fillStyle='#141418';
   rr(cx, -56, -11, 74, 11, 4); cx.fill();
@@ -839,7 +965,7 @@ function paintRun(cx){
   }
 
   withCam(cx, cam, ()=>{
-    const x0=cam.x-60, x1=cam.x+PW+60;
+    const x0=cam.x-160, x1=cam.x+PW+80; // extra left pad so cutaway never shows sky0
     // one full-detail atlas pine near the run
     pine(cx, sledWX+200, slopeAt(sledWX+200,base,amp).y, PINE_S*2.1);
     drawUphillSnow(cx, base, amp, {}, [x0, x1]);
