@@ -1,0 +1,193 @@
+{
+  "tip_note": "scale-only lock vs standing human ruler",
+  "frames": {
+    "run": {
+      "path": "/opt/cursor/artifacts/backcountry-climb-concept/run.png",
+      "size": [
+        390,
+        844
+      ],
+      "bytes": 245263
+    },
+    "landscape": {
+      "path": "/opt/cursor/artifacts/backcountry-climb-concept/landscape.png",
+      "size": [
+        844,
+        390
+      ],
+      "bytes": 266956
+    }
+  },
+  "scale": {
+    "CAM_ROT": 0,
+    "HUMAN_H_FRAC": 0.1,
+    "HUMAN_H_FRAC_MIN": 0.09,
+    "HUMAN_H_FRAC_MAX": 0.11,
+    "PW": 390,
+    "PH": 844,
+    "PLAY_Y": 523,
+    "HUMAN_PX": 84.4,
+    "SLED_LEN_PX": 126.60000000000001,
+    "SLED_H_PX": 56.54800000000001,
+    "SLED_SCALE": 1.1943396226415095,
+    "SLED_LEN_X_HUMAN": 1.5,
+    "SLED_H_X_HUMAN": 0.67,
+    "SLED_LEN_U": 106,
+    "SLED_H_U": 42,
+    "PINE_S": 0.9590909090909091,
+    "PINE_H_X_HUMAN_MIN": 1.5,
+    "PINE_H_X_HUMAN_MAX": 2.5,
+    "PINE_H_U": 88,
+    "BOULDER_R": {
+      "S": 15.192,
+      "M": 23.632000000000005,
+      "L": 30.384,
+      "XL": 40.512
+    },
+    "BOULDER_R_X_HUMAN": {
+      "S": 0.18,
+      "M": 0.28,
+      "L": 0.36,
+      "XL": 0.48
+    },
+    "KICKER_AMP": 97.06,
+    "KICKER_H_X_HUMAN": 1.15,
+    "ANIMAL_H_X_HUMAN": {
+      "coyote": 0.45,
+      "bear": 0.85,
+      "moose": 1.35
+    },
+    "seatedRiderLocalH": 26,
+    "seatedRiderPx": 31.05283018867925
+  },
+  "landscape_scale": {
+    "CAM_ROT": 0,
+    "HUMAN_H_FRAC": 0.1,
+    "HUMAN_H_FRAC_MIN": 0.09,
+    "HUMAN_H_FRAC_MAX": 0.11,
+    "PW": 844,
+    "PH": 390,
+    "PLAY_Y": 242,
+    "HUMAN_PX": 39,
+    "SLED_LEN_PX": 58.5,
+    "SLED_H_PX": 26.130000000000003,
+    "SLED_SCALE": 0.5518867924528302,
+    "SLED_LEN_X_HUMAN": 1.5,
+    "SLED_H_X_HUMAN": 0.67,
+    "SLED_LEN_U": 106,
+    "SLED_H_U": 42,
+    "PINE_S": 0.4431818181818182,
+    "PINE_H_X_HUMAN_MIN": 1.5,
+    "PINE_H_X_HUMAN_MAX": 2.5,
+    "PINE_H_U": 88,
+    "BOULDER_R": {
+      "S": 7.02,
+      "M": 10.920000000000002,
+      "L": 14.04,
+      "XL": 18.72
+    },
+    "BOULDER_R_X_HUMAN": {
+      "S": 0.18,
+      "M": 0.28,
+      "L": 0.36,
+      "XL": 0.48
+    },
+    "KICKER_AMP": 44.849999999999994,
+    "KICKER_H_X_HUMAN": 1.15,
+    "ANIMAL_H_X_HUMAN": {
+      "coyote": 0.45,
+      "bear": 0.85,
+      "moose": 1.35
+    },
+    "seatedRiderLocalH": 26,
+    "seatedRiderPx": 14.349056603773587
+  },
+  "measurements": {
+    "human_px": 84.4,
+    "human_frac_of_ph": 0.1,
+    "sled_len_px": 126.6,
+    "sled_h_px": 56.55,
+    "sled_len_x_human": 1.5,
+    "seated_rider_px": 31.05,
+    "pine_h_at_1_5x_human": 126.6,
+    "pine_h_at_2_5x_human": 211,
+    "boulder_r_px": {
+      "S": 15.192,
+      "M": 23.632000000000005,
+      "L": 30.384,
+      "XL": 40.512
+    },
+    "kicker_amp_px": 97.1,
+    "animal_h_px": {
+      "coyote": 38,
+      "bear": 71.7,
+      "moose": 113.9
+    }
+  },
+  "checks": [
+    {
+      "id": "human_frac",
+      "ok": true,
+      "value": 0.1,
+      "expect": "0.09–0.11"
+    },
+    {
+      "id": "human_px_390x844",
+      "ok": true,
+      "value": 84.4,
+      "expect": "75–90"
+    },
+    {
+      "id": "sled_len_x_human",
+      "ok": true,
+      "value": 1.5,
+      "expect": 1.5
+    },
+    {
+      "id": "sled_h_x_human",
+      "ok": true,
+      "value": 0.67,
+      "expect": 0.67
+    },
+    {
+      "id": "pine_height_band_px",
+      "ok": true,
+      "value": {
+        "min": 126.6,
+        "max": 211
+      },
+      "expect": "1.5–2.5 × HUMAN_PX"
+    },
+    {
+      "id": "boulder_xl_r_x_human",
+      "ok": true,
+      "value": 0.48,
+      "expect": 0.48
+    },
+    {
+      "id": "kicker_h_x_human",
+      "ok": true,
+      "value": 1.15,
+      "expect": 1.15
+    },
+    {
+      "id": "cam_rot",
+      "ok": true,
+      "value": 0,
+      "expect": 0
+    },
+    {
+      "id": "run_frame",
+      "ok": true,
+      "value": "390x844",
+      "expect": "390x844"
+    },
+    {
+      "id": "landscape_frame",
+      "ok": true,
+      "value": "844x390",
+      "expect": "844x390"
+    }
+  ],
+  "pass": true
+}

@@ -1,0 +1,19 @@
+{
+  "name": "terrain-park-next",
+  "private": true,
+  "version": "0.5.1-next",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "playwright test",
+    "serve": "node scripts/static-server.mjs"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}

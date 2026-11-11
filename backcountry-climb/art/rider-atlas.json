@@ -1,0 +1,18 @@
+{
+ "image": "rider-atlas@2x.webp",
+ "scale": "2x DPR; ride pose = 170px = ~85 CSS px (RIDER_H_FRAC 0.10 on 844 tall); cropped to BC-used frames",
+ "frames": {
+  "ride": {
+   "x": 2,
+   "y": 2,
+   "w": 145,
+   "h": 170
+  },
+  "air": {
+   "x": 149,
+   "y": 2,
+   "w": 134,
+   "h": 142
+  }
+ }
+}

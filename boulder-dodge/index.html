@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>Boulder Dodge</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a4060;touch-action:none;font-family:system-ui,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#ui{position:fixed;inset:0;pointer-events:none;z-index:2}
+#ui button{pointer-events:auto;border:0;cursor:pointer}
+#jumpB{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(22px,env(safe-area-inset-bottom));width:96px;height:96px;border-radius:50%;background:#e8772e;color:#0b1830;font:800 17px system-ui;box-shadow:0 7px 0 #9a4a12;display:none}
+#jumpB:active{transform:translateY(3px);box-shadow:0 4px 0 #9a4a12}
+#chrome{position:absolute;top:max(10px,env(safe-area-inset-top));right:10px;display:flex;gap:8px}
+#chrome button{width:42px;height:42px;border-radius:10px;background:#14213dcc;color:#eef4fb;border:1px solid #ffffff44;font:700 15px system-ui}
+#menuB{position:absolute;left:max(12px,env(safe-area-inset-left));bottom:max(28px,env(safe-area-inset-bottom));min-width:74px;height:42px;padding:0 14px;border-radius:10px;background:#14213dcc;color:#9fd3ff;border:1px solid #ffffff44;font:800 13px system-ui;display:none}
+#menu{position:fixed;inset:0;z-index:3;display:none;padding:16px;overflow:auto;text-align:center;color:#0b1830;background:linear-gradient(180deg,rgba(255,244,210,.22),rgba(120,180,220,.08) 42%,rgba(255,255,255,0))}
+#menu .wrap{max-width:360px;margin:8vh auto 0;padding:22px 18px 18px;border-radius:22px;background:linear-gradient(165deg,rgba(255,255,255,.78),rgba(220,236,248,.58));border:2px solid rgba(255,255,255,.85);box-shadow:0 18px 40px rgba(20,50,80,.22),inset 0 1px 0 #fff}
+#menu h1{font:900 34px/1.05 system-ui;letter-spacing:.04em;color:#14213d;text-shadow:0 1px 0 #fff,0 8px 18px rgba(232,119,46,.35)}
+#menu .hi{color:#c45e18;font:800 14px system-ui;margin:8px 0 14px}
+.playBig{display:block;width:100%;min-height:92px;margin:0 0 10px;border-radius:18px;border:3px solid #fff;background:linear-gradient(180deg,#ff9a3c,#e8772e);color:#fff;font:900 36px system-ui;box-shadow:0 9px 0 #9a4a12,0 14px 28px rgba(232,119,46,.35);text-shadow:0 1px 0 #9a4a12}
+.playBig:active{transform:translateY(2px);box-shadow:0 7px 0 #9a4a12}
+.sheetNav{display:flex;gap:10px;justify-content:center;margin:10px 0 2px}
+.sheetNav button{width:66px;min-height:54px;border-radius:12px;border:1px solid rgba(20,33,61,.18);background:rgba(255,255,255,.72);color:#14213d;font:800 11px system-ui}
+.sheetNav .ic{display:block;font-size:18px;margin-bottom:2px}
+.tag{opacity:.7;font-size:12px;margin-top:10px;color:#3a5070}
+#menu .lvl{opacity:.9;margin:2px 0 4px;font:800 13px system-ui;color:#1e3a5f}
+.sheet{text-align:left;max-width:420px;margin:8vh auto 0;background:rgba(11,24,48,.88);border:1px solid #fff3;border-radius:14px;padding:14px}
+.sheet h2{font:800 18px system-ui;margin:0 0 8px}
+.sheet p,.sheet li{font:500 14px/1.45 system-ui;opacity:.92}
+.sheet button.back{margin-top:12px;min-height:40px;padding:0 12px;border-radius:10px;background:#2a3a55;color:#fff;font:800 13px system-ui}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="ui">
+  <div id="chrome"><button type="button" id="mute" aria-label="Mute">♪</button><button type="button" id="pause" aria-label="Pause">❚❚</button></div>
+  <button type="button" id="menuB">MENU</button>
+  <button type="button" id="jumpB">JUMP</button>
+</div>
+<div id="menu" role="dialog" aria-modal="true"></div>
+<script>
+(function(){
+'use strict';
+var VER='0.9.13-rebuild';
+var cv=document.getElementById('cv'),cx=cv.getContext('2d');
+var W=390,H=844,scale=1,OY=0,dpr=1;
+var GROUND=268,G=3400,JV=-980,DT=1/120;
+var COYOTE=0.09,BUFFER=0.11,HOLD_CUT=0.62;
+var BPM=128,BEAT=60/BPM,SPD=350;
+var TER=[1.1,2.4,0.7];
+/* Standing rider+board as fraction of playfield height (9–11%). Single scale lock — never grow for detail. */
+var RIDER_H_FRAC=0.10;
+var RIDER_LOCAL_H=94; /* vector fallback local units */
+var RIDER_ATLAS_H=85; /* ride frame h @1x CSS px */
+/* Art: 1x atlas always; resort backdrops lazy-load per level (file-swap ready). */
+var ART_CFG={dir:'art/',atlas:'bd-atlas'};
+var ART={ok:false,dpr:1,atlas:null,bg:{},bgLoading:{}};
+var THEME={sky:['#5aa0d0','#9ecce8','#e6f3fb'],snow:'#f4f9fd',shade:'#aec6da',accent:'#e8772e',ink:'#14213d',
+  far:'#4a6a88',mid:'#5f82a2',near:'#6f96b4',forest:'#2a4a40',nearSnow:'#d9e6f0'};
+var KIT={jacket:'#1e3a5f',jacketHi:'#4a7ab0',jacketShade:'#142846',pants:'#2a3344',pantsHi:'#5a6a80',beanie:'#e8772e',beanieRib:'#c45e18',pom:'#f4f1ea',goggle:'#1a222c',lens:'#5ec8ff',lensHi:'#d0f4ff',mitten:'#2a3548',boot:'#121820',skin:'#e8b890',board:'#e8772e',boardStripe:'#ffd0a0',boardEdge:'#14213d',rim:'rgba(255,255,255,.55)',outline:'#0e141c'};
+
+/* Shared L1 chart — four levels rotate resort backdrops only */
+var L1_LEN=6400;
+var CHART=[
+  {x:560,t:'rockS'},{x:820,t:'teach'},
+  {x:1100,t:'rockS'},{x:1380,t:'double'},
+  {x:1720,t:'coyote'},{x:1980,t:'rockM'},
+  {x:2280,t:'stagger'},{x:2620,t:'grom'},
+  {x:2920,t:'kicker'},{x:3360,t:'rockS'},
+  {x:3620,t:'roll'},{x:3980,t:'rockM'},
+  {x:4280,t:'gap'},{x:4680,t:'coyote'},
+  {x:4980,t:'kicker'},{x:5360,t:'double'},
+  {x:5680,t:'rockL'},{x:5980,t:'grom'},{x:6220,t:'rockM'}
+];
+var LEVELS=[
+  {id:'L1',name:'First Tracks',bg:'bg-bluebird.webp',sky:['#5aa0d0','#9ecce8','#e6f3fb']},
+  {id:'L2',name:'Alpenglow Bowl',bg:'bg-alpenglow.webp',sky:['#c45a3a','#e8a060','#f6d5a8']},
+  {id:'L3',name:'Storm Powder',bg:'bg-storm.webp',sky:['#6a7a88','#9aa8b4','#c8d2da']},
+  {id:'L4',name:'Night Park',bg:'bg-night.webp',sky:['#0e1a30','#1a3050','#2a4468']}
+];
+var levelIdx=0;
+function curLevel(){return LEVELS[levelIdx%LEVELS.length];}
+
+var S,acc=0,last=0,muted=false,menuSheet=null,pb=0,attempts=0,flakes=[];
+try{pb=+(localStorage.getItem('bd9.pb')||0)}catch(e){}
+try{muted=localStorage.getItem('bd9.mute')==='1'}catch(e){}
+try{levelIdx=Math.max(0,Math.min(LEVELS.length-1,+(localStorage.getItem('bd9.lvl')||0)|0))}catch(e){}
+
+function rideX(){return Math.round(Math.max(72,Math.min(W*(isLand()?0.22:0.28),W*(isLand()?0.24:0.30))));}
+function isLand(){return W>H*1.15;}
+function riderSc(){return (RIDER_H_FRAC*H)/RIDER_LOCAL_H;}
+function worldRiderH(){return RIDER_H_FRAC*H;}
+function menuOpen(){var el=document.getElementById('menu');return el&&el.style.display!=='none';}
+/* game-units per atlas/CSS px — ride = RIDER_H_FRAC × playfield for every sprite */
+function artSc(){
+  var rh=(ART.ok&&ART.atlas&&ART.atlas.frames.ride)?ART.atlas.frames.ride.h:RIDER_ATLAS_H;
+  return worldRiderH()/rh;
+}
+function artSize(name){
+  if(!ART.ok||!ART.atlas||!ART.atlas.frames[name])return null;
+  var f=ART.atlas.frames[name],s=artSc();return {f:f,w:f.w*s,h:f.h*s,img:ART.atlas.img};
+}
+function drawArt(name,x,gy,opt){
+  var a=artSize(name);if(!a)return false;
+  opt=opt||{};
+  cx.save();cx.translate(x,gy);
+  if(opt.spin)cx.rotate(opt.spin);
+  if(opt.flip)cx.scale(-1,1);
+  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
+  cx.restore();return true;
+}
+function loadImg(src){
+  return new Promise(function(res,rej){var img=new Image();img.onload=function(){res(img);};img.onerror=rej;img.src=src;});
+}
+function bootArt(){
+  /* Atlas only on first load — backdrops lazy-load per level */
+  var dir=ART_CFG.dir;
+  fetch(dir+ART_CFG.atlas+'.json').then(function(r){return r.json();}).then(function(meta){
+    return loadImg(dir+meta.image).then(function(img){return {img:img,frames:meta.frames,dpr:meta.dpr||1};});
+  }).then(function(atlas){
+    ART.atlas=atlas;ART.dpr=atlas.dpr||1;ART.ok=true;
+    if(atlas.frames.ride)RIDER_ATLAS_H=atlas.frames.ride.h;
+    if(S)S.obs=buildObs();
+    ensureBackdrop(curLevel().bg);
+    preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
+  }).catch(function(err){ART.ok=false;console&&console.warn('BD art fallback',err);});
+}
+function ensureBackdrop(file){
+  if(!file||ART.bg[file]||ART.bgLoading[file])return ART.bgLoading[file]||Promise.resolve(ART.bg[file]||null);
+  ART.bgLoading[file]=loadImg(ART_CFG.dir+file).then(function(img){
+    ART.bg[file]=img;delete ART.bgLoading[file];return img;
+  }).catch(function(err){
+    delete ART.bgLoading[file];console&&console.warn('BD backdrop',file,err);return null;
+  });
+  return ART.bgLoading[file];
+}
+function preloadBackdrop(file){
+  if(!file||ART.bg[file]||ART.bgLoading[file])return;
+  /* cheap idle preload of next level backdrop */
+  var run=function(){ensureBackdrop(file);};
+  if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:1200});
+  else setTimeout(run,400);
+}
+function setLevel(i){
+  levelIdx=((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length;
+  try{localStorage.setItem('bd9.lvl',levelIdx)}catch(e){}
+  ensureBackdrop(curLevel().bg);
+  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
+}
+/* Rolling downhill: world rolls + screen-space pitch so the run reads downhill without camera tilt */
+function terr(wx){
+  /* Aggressive rollers / dips / pitches — readable at phone size */
+  return 96*(0.50*Math.sin(wx/250+TER[0])+0.32*Math.sin(wx/130+TER[1])+0.18*Math.sin(wx/60+TER[2]))
+    + 22*Math.sin(wx/420) + 12*Math.sin(wx/88);
+}
+function gY(sx){
+  var wx=(S?S.dist:0)+(sx-rideX());
+  return GROUND+terr(wx)+(sx-rideX())*0.28;
+}
+function slopeAt(sx){return Math.atan2(gY(sx+5)-gY(sx-5),10);}
+function ell(x,y,rx,ry,rot){cx.beginPath();cx.ellipse(x,y,rx,ry,rot||0,0,Math.PI*2);}
+function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
+function cap(x0,y0,x1,y1,r){var dx=x1-x0,dy=y1-y0,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;cx.beginPath();cx.moveTo(x0+nx*r,y0+ny*r);cx.arc(x0,y0,r,Math.atan2(ny,nx),Math.atan2(-ny,-nx),false);cx.lineTo(x1-nx*r,y1-ny*r);cx.arc(x1,y1,r,Math.atan2(-ny,-nx),Math.atan2(ny,nx),false);cx.closePath();}
+
+/* —— Rider poses —— */
+function poseFor(){
+  var p=S.p,t=S.t;
+  if(S.mode==='over'){
+    var u=Math.min(1,(S.crashT||0)/0.55);
+    /* Believable tumble: tucked limbs, body rolls as a unit, board flies off */
+    return{
+      crash:1,lean:0.08,knee:0.72,squash:0.9,air:true,
+      bodyRot:u*Math.PI*1.35,
+      lArmX:-14,lArmY:-10+u*6,rArmX:16,rArmY:-8+u*8,
+      boardFly:1,boardRot:0.4+u*Math.PI*2.1,boardOffX:18+u*52,boardOffY:-12-u*38
+    };
+  }
+  if(!p.on){
+    var tuck=p.vy>80?0.55:0.38;
+    return{lean:-0.06,knee:tuck,squash:1,boardRot:p.vy<-220?-0.12:0.16,boardY:-3,air:true,lArmX:-30,lArmY:-62,rArmX:34,rArmY:-56,armsOut:1};
+  }
+  if(S.landT>0)return{lean:0.12,knee:0.88,squash:0.82,boardRot:0,boardY:1,air:false,lArmX:-12,lArmY:-18,rArmX:16,rArmY:-16};
+  if(S.nearT>0)return{lean:0.18,knee:0.7,squash:1,boardRot:0.04,air:false,lArmX:-22,lArmY:-40,rArmX:32,rArmY:-28};
+  // crouch when approaching hazard
+  var crouch=0;
+  for(var i=0;i<S.obs.length;i++){var o=S.obs[i],ox=o.x-S.dist+p.x;if(ox>p.x&&ox<p.x+160&&(o.k==='rock'||o.k==='roll')){crouch=1;break;}}
+  if(crouch)return{lean:0.14,knee:0.78,squash:0.96,boardRot:0,air:false,lArmX:-14,lArmY:-26,rArmX:22,rArmY:-22};
+  return{lean:0.08+Math.sin(t*4)*0.02,knee:0.56+Math.sin(t*5.2)*0.03,squash:1,boardRot:0,air:false,lArmX:-18,lArmY:-34+Math.sin(t*4)*2,rArmX:30,rArmY:-24+Math.sin(t*4.2)*2};
+}
+function paintBoard(pose){
+  var K=KIT;
+  cx.save();
+  if(pose.boardFly){cx.translate(pose.boardOffX||0,pose.boardOffY||0);cx.rotate(pose.boardRot||0);}
+  else{cx.rotate(pose.boardRot||0);cx.translate(0,pose.boardY||0);}
+  cx.fillStyle=K.boardEdge;rr(-36,-5,72,13,6);cx.fill();
+  cx.fillStyle=K.board;rr(-34,-4,68,11,5);cx.fill();
+  cx.fillStyle=K.boardStripe;cx.fillRect(-24,-1.5,48,2.4);
+  if(pose.boardFly){cx.fillStyle=K.boardEdge;cx.fillRect(-30,2,60,2);}
+  cx.restore();
+}
+function paintRiderArt(pose,t){
+  var name='ride';
+  if(pose.crash||S.mode==='over')name='crash';
+  else if(!S.p.on){
+    if(S.holding||(S.p.vy>-80&&S.p.vy<160))name='indy';
+    else name='air';
+  }else if(S.landT>0)name='land';
+  var a=artSize(name);if(!a)return false;
+  cx.save();
+  /* bob only in air — on snow the board stays planted on the surface line */
+  if(pose.air&&name!=='crash')cx.translate(0,Math.sin(t*5)*0.1);
+  /* crash sprite already posed — light tip only */
+  if(name==='crash')cx.rotate(Math.min(0.35,(S.crashT||0)*0.6));
+  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
+  cx.restore();
+  return true;
+}
+function paintRider(pose,t){
+  if(ART.ok&&paintRiderArt(pose,t))return;
+  var K=KIT,lean=pose.lean||0,knee=pose.knee||0.55,sq=pose.squash||1;
+  var rs=riderSc(); /* tuck/grab stay in local units — never upscale poses */
+  cx.save();cx.scale(rs,rs);if(pose.air)cx.translate(0,Math.sin(t*5)*0.15);
+  cx.fillStyle='rgba(14,20,28,.28)';ell(pose.boardFly?8:0,10,30,4);cx.fill();
+  /* Board first — attached normally, or flying free on crash */
+  paintBoard(pose);
+  cx.save();
+  if(pose.bodyRot)cx.rotate(pose.bodyRot);
+  var bootY=-3-knee*14,st=12;
+  if(!pose.boardFly){cx.fillStyle=K.boot;rr(-st-5,bootY,11,8,2);cx.fill();rr(st-6,bootY,11,8,2);cx.fill();}
+  else{cx.fillStyle=K.boot;rr(-st-4,bootY-2,10,7,2);cx.fill();rr(st-5,bootY+2,10,7,2);cx.fill();}
+  var hipY=-30-knee*5;cx.save();cx.translate(lean*12,hipY);cx.scale(1,sq);cx.translate(-lean*12,-hipY);
+  cx.strokeStyle=K.pants;cx.lineWidth=10;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(-st+2,hipY);cx.lineTo(-st+(pose.crash?6:8),bootY+1);cx.stroke();
+  cx.beginPath();cx.moveTo(st-2,hipY);cx.lineTo(st-(pose.crash?2:5),bootY+(pose.crash?3:1));cx.stroke();
+  cx.strokeStyle=K.pantsHi;cx.lineWidth=3;cx.globalAlpha=.45;
+  cx.beginPath();cx.moveTo(-st+2,hipY);cx.lineTo(-st+8,bootY+1);cx.stroke();cx.globalAlpha=1;
+  var top=hipY-28,lx=lean*12;
+  cx.fillStyle=K.jacket;
+  cx.beginPath();cx.moveTo(lx-17,top+5);cx.quadraticCurveTo(lx,top-5,lx+18,top+4);
+  cx.quadraticCurveTo(lx+21,hipY-6,lx+15,hipY+9);cx.quadraticCurveTo(lx,hipY+13,lx-15,hipY+9);
+  cx.quadraticCurveTo(lx-21,hipY-6,lx-17,top+5);cx.closePath();cx.fill();
+  cx.fillStyle=K.jacketShade;cx.globalAlpha=.42;cx.beginPath();cx.moveTo(lx+2,top+7);cx.quadraticCurveTo(lx+15,hipY-2,lx+9,hipY+7);cx.lineTo(lx+2,top+7);cx.fill();cx.globalAlpha=1;
+  cx.fillStyle=K.jacketHi;cx.globalAlpha=.55;ell(lx-6,top+9,7,5,-.3);cx.fill();cx.globalAlpha=1;
+  cx.strokeStyle=K.rim;cx.lineWidth=1.7;cx.beginPath();cx.moveTo(lx-15,top+6);cx.quadraticCurveTo(lx-17,hipY-4,lx-11,hipY+5);cx.stroke();
+  cx.strokeStyle=THEME.accent;cx.lineWidth=2.2;cx.beginPath();cx.moveTo(lx-1,top+7);cx.lineTo(lx+4,hipY+2);cx.stroke();
+  var ax=pose.lArmX||-18,ay=pose.lArmY||-34,bx=pose.rArmX||30,by=pose.rArmY||-24;
+  cx.strokeStyle=K.jacket;cx.lineWidth=7.5;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(lx-13,top+9);cx.lineTo(ax,ay);cx.stroke();
+  cx.beginPath();cx.moveTo(lx+13,top+9);cx.lineTo(bx,by);cx.stroke();
+  cx.fillStyle=K.mitten;ell(ax,ay,5.5,5.5);cx.fill();ell(bx,by,5.5,5.5);cx.fill();
+  var hx=lx+2,hy=top-1;
+  cx.fillStyle=K.skin;ell(hx,hy-9,9,9);cx.fill();
+  cx.fillStyle=K.beanie;rr(hx-11,hy-22,22,11,4);cx.fill();
+  cx.fillStyle=K.beanieRib;cx.fillRect(hx-11,hy-13,22,3.2);
+  cx.fillStyle=K.pom;ell(hx,hy-24,3.5,3.5);cx.fill();
+  cx.fillStyle=K.goggle;rr(hx-10,hy-13,20,7.5,2);cx.fill();
+  cx.fillStyle=K.lens;rr(hx-8,hy-12,16,5.5,1.5);cx.fill();
+  cx.fillStyle=K.lensHi;cx.globalAlpha=.55;cx.fillRect(hx-7,hy-11,6,2.2);cx.globalAlpha=1;
+  cx.restore();cx.restore();cx.restore();
+}
+
+/* —— Boulders (rounded stacked lobes, soft shade, snow cap — no hard poly strokes) —— */
+function drawBoulder(x,gy,w,h,seed,spin){
+  /* Atlas boulder at native artSc — no per-object rescale; spin OK on sprite */
+  if(ART.ok&&drawArt('boulder',x+(w||0)/2,gy,{spin:spin||0}))return;
+  var cx0=x+w/2,s=seed|0;
+  cx.save();cx.translate(cx0,gy);if(spin)cx.rotate(spin);
+  // contact shadow
+  cx.fillStyle='rgba(30,45,65,.32)';ell(0,2,w*0.55,Math.max(5,h*0.12));cx.fill();
+  // body: soft stacked ellipses (reads as a real rock, not a broken polygon)
+  var g=cx.createRadialGradient(-w*0.22,-h*0.55,2,0,-h*0.2,w*0.78);
+  g.addColorStop(0,'#c4c9d0');g.addColorStop(0.45,'#8a9098');g.addColorStop(1,'#4a5058');
+  cx.fillStyle=g;
+  ell(-w*0.08,-h*0.38,w*0.48,h*0.42);cx.fill();
+  ell(w*0.18,-h*0.28,w*0.36,h*0.34);cx.fill();
+  ell(0,-h*0.18,w*0.52,h*0.28);cx.fill();
+  // soft outline (no black hairlines)
+  cx.strokeStyle='rgba(40,48,58,.35)';cx.lineWidth=1.4;
+  ell(0,-h*0.28,w*0.5,h*0.4);cx.stroke();
+  // face facets (subtle, clipped feel via alpha fills)
+  cx.fillStyle='rgba(255,255,255,.18)';ell(-w*0.2,-h*0.5,w*0.18,h*0.14);cx.fill();
+  cx.fillStyle='rgba(30,35,42,.22)';ell(w*0.16,-h*0.22,w*0.16,h*0.14);cx.fill();
+  // snow cap — readable white mound
+  cx.fillStyle='#f4f8fc';
+  ell(-w*0.02,-h*0.62,w*0.34,h*0.16);cx.fill();
+  cx.beginPath();cx.moveTo(-w*0.34,-h*0.48);cx.quadraticCurveTo(0,-h*0.82,w*0.32,-h*0.42);
+  cx.quadraticCurveTo(w*0.08,-h*0.52,-w*0.06,-h*0.55);cx.closePath();cx.fill();
+  cx.fillStyle='rgba(180,200,220,.45)';ell(w*0.08,-h*0.58,w*0.12,h*0.06);cx.fill();
+  // tiny seed sparkle for variety
+  if(s%2){cx.fillStyle='rgba(255,255,255,.55)';ell(-w*0.12,-h*0.7,2.2,1.6);cx.fill();}
+  cx.restore();
+}
+function drawKicker(x,gy,w,h){
+  /* no kicker in lite atlas — vector ramp */
+  cx.fillStyle='#c8dced';cx.beginPath();cx.moveTo(x,gy);cx.lineTo(x+w*0.5,gy-h);cx.lineTo(x+w,gy-h*0.12);cx.lineTo(x+w,gy);cx.closePath();cx.fill();
+  cx.strokeStyle='#14213d';cx.lineWidth=2;cx.stroke();
+  cx.fillStyle='#f2f7fb';cx.fillRect(x+w*0.32,gy-h-2,w*0.38,3.5);
+  cx.fillStyle='rgba(20,40,60,.15)';cx.beginPath();cx.moveTo(x,gy);cx.lineTo(x+w,gy);cx.lineTo(x+w,gy+6);cx.lineTo(x,gy+4);cx.fill();
+}
+function drawCoyote(x,gy,t,ph,ow){
+  /* animals face left in atlas — correct as-is (rider faces right) */
+  if(ART.ok&&drawArt('coyote',x+(ow||(artSize('coyote')||{w:40}).w)/2,gy,null))return;
+  var bob=Math.sin(t*10+ph)*1.5,target=worldRiderH()*0.35,asc=target/40,w=58;
+  cx.save();cx.translate(x,gy);cx.scale(asc,asc);cx.translate(-x,-gy);
+  cx.fillStyle='#8a5a32';
+  for(var i=0;i<4;i++){var sw=Math.sin(t*8+ph+i*1.4)*3;cap(x+10+i*9,gy-14,x+10+i*9+sw,gy-1,3);cx.fill();}
+  cx.fillStyle='#c4925a';ell(x+w*0.42,gy-21+bob*0.2,w*0.34,11);cx.fill();
+  cx.fillStyle='#e0b888';cx.globalAlpha=.4;ell(x+w*0.36,gy-25,w*0.2,5);cx.fill();cx.globalAlpha=1;
+  cx.fillStyle='#c4925a';ell(x+w*0.72,gy-25,9,7.5);cx.fill();
+  cx.beginPath();cx.moveTo(x+w*0.78,gy-23);cx.lineTo(x+w*0.98,gy-21);cx.lineTo(x+w*0.92,gy-16);cx.closePath();cx.fill();
+  cx.fillStyle='#c4925a';cx.beginPath();cx.moveTo(x+w*0.68,gy-32);cx.lineTo(x+w*0.72,gy-40);cx.lineTo(x+w*0.78,gy-31);cx.fill();
+  cx.beginPath();cx.moveTo(x+w*0.78,gy-31);cx.lineTo(x+w*0.86,gy-39);cx.lineTo(x+w*0.88,gy-30);cx.fill();
+  cx.fillStyle='#0e141c';ell(x+w*0.8,gy-26,1.6,1.6);cx.fill();
+  cx.strokeStyle='#c4925a';cx.lineWidth=5;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(x+8,gy-18);cx.quadraticCurveTo(x-6,gy-28+bob,x+4,gy-10);cx.stroke();
+  cx.restore();
+}
+function drawGrom(x,gy,t,ow){
+  /* skier faces left — used as on-slope grom obstacle at native scale */
+  if(ART.ok&&drawArt('skier',x+(ow||(artSize('skier')||{w:40}).w)/2,gy,null))return;
+  var bob=Math.sin(t*7)*1.2,asc=(worldRiderH()*0.55)/48;
+  cx.save();cx.translate(x,gy);cx.scale(asc,asc);cx.translate(-x,-gy);
+  cx.fillStyle='rgba(20,30,45,.2)';ell(x+14,gy+2,16,3);cx.fill();
+  cx.fillStyle='#3d6ec9';rr(x+4,gy-34+bob,18,16,4);cx.fill();
+  cx.fillStyle='#e8b890';ell(x+13,gy-40+bob,7,7);cx.fill();
+  cx.fillStyle='#ff5a7a';rr(x+6,gy-48+bob,14,8,3);cx.fill();
+  cx.fillStyle='#2a2f3a';cx.fillRect(x+7,gy-18+bob,5,12);cx.fillRect(x+14,gy-18+bob,5,12);
+  cx.fillStyle='#c4a06a';rr(x-2,gy-6,30,7,3);cx.fill();
+  cx.restore();
+}
+
+function drawPine(x,gy,kind){
+  /* upright full-detail atlas pines — tall/small native only */
+  var nm=(kind==='tall'||kind===1)?'pine_tall':'pine_small';
+  if(ART.ok&&drawArt(nm,x,gy,null))return;
+  var sc=(typeof kind==='number')?kind:(kind==='tall'?2.1:1.55);
+  sc=sc*worldRiderH()/58;
+  cx.save();cx.translate(x,gy);cx.scale(sc,sc);
+  cx.fillStyle='#1f4036';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(18,-24);cx.lineTo(9,-24);cx.lineTo(20,-6);cx.lineTo(-20,-6);cx.lineTo(-9,-24);cx.lineTo(-18,-24);cx.closePath();cx.fill();
+  cx.fillStyle='#2f5a48';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(11,-30);cx.lineTo(-11,-30);cx.closePath();cx.fill();
+  cx.fillStyle='#e8f0f6';cx.globalAlpha=.8;cx.beginPath();cx.moveTo(0,-58);cx.lineTo(7,-42);cx.lineTo(-7,-42);cx.closePath();cx.fill();cx.globalAlpha=1;
+  cx.fillStyle='#5a3a22';cx.fillRect(-2.5,-6,5,9);
+  cx.restore();
+}
+function drawDrift(x,gy,w){
+  cx.fillStyle='rgba(255,255,255,.7)';cx.beginPath();cx.moveTo(x,gy);cx.quadraticCurveTo(x+w*0.4,gy-10,x+w,gy-2);cx.lineTo(x+w,gy+4);cx.lineTo(x,gy+3);cx.fill();
+  cx.fillStyle='rgba(160,185,210,.25)';cx.beginPath();cx.moveTo(x,gy+2);cx.quadraticCurveTo(x+w*0.5,gy+8,x+w,gy+3);cx.lineTo(x,gy+3);cx.fill();
+}
+
+/* —— audio —— */
+var ac=null,musicOn=false,nextBeat=0;
+function ensureAC(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}return ac;}
+function beep(f,d,type,v){if(muted||!ensureAC())return;var o=ac.createOscillator(),g=ac.createGain();o.type=type||'square';o.frequency.value=f;g.gain.value=v||.06;o.connect(g);g.connect(ac.destination);o.start();g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+(d||.08));o.stop(ac.currentTime+(d||.08)+.02);}
+function kick(){beep(90,.09,'sine',.1);beep(180,.05,'triangle',.05);}
+function jumpSFX(){beep(520,.05,'square',.05);beep(760,.06,'triangle',.04);}
+function landSFX(){beep(180,.05,'sine',.06);}
+function crashSFX(){beep(110,.25,'sawtooth',.12);}
+function startMusic(){if(muted)return;ensureAC();if(ac&&ac.state==='suspended')ac.resume();musicOn=true;nextBeat=performance.now();}
+function stopMusic(){musicOn=false;}
+function tickMusic(now){if(!musicOn||muted||!ac)return;while(now>=nextBeat){kick();S.pulse=1;nextBeat+=BEAT*1000;}}
+
+/* —— state —— */
+function buildObs(){
+  /* Hitboxes follow visual sizes. With art: native atlas frames via artSc (no per-object rescale). */
+  var R=worldRiderH(),obs=[],i,e,x;
+  var B,C,K,G,sc;
+  if(ART.ok){
+    sc=artSc();
+    B={w:ART.atlas.frames.boulder.w*sc,h:ART.atlas.frames.boulder.h*sc};
+    C={w:ART.atlas.frames.coyote.w*sc,h:ART.atlas.frames.coyote.h*sc};
+    K={w:1.4*R,h:0.85*R}; /* vector kicker */
+    G={w:ART.atlas.frames.skier.w*sc,h:ART.atlas.frames.skier.h*sc};
+  }else{
+    B={w:0.90*R,h:0.72*R};C={w:0.75*R,h:0.35*R};K={w:1.4*R,h:0.85*R};G={w:0.42*R,h:0.55*R};
+  }
+  for(i=0;i<CHART.length;i++){
+    e=CHART[i];x=e.x;
+    /* All rocks share the boulder sprite size when art is on (native scale). */
+    if(e.t==='rockS'||e.t==='teach'||e.t==='rockM'||e.t==='rockL')obs.push({k:'rock',x:x,w:B.w,h:B.h,seed:i*3+1});
+    else if(e.t==='double'){obs.push({k:'rock',x:x,w:B.w,h:B.h,seed:i});obs.push({k:'rock',x:x+B.w*1.35,w:B.w,h:B.h,seed:i+1});}
+    else if(e.t==='stagger'){obs.push({k:'rock',x:x,w:B.w,h:B.h,seed:i});obs.push({k:'rock',x:x+B.w*1.8,w:B.w,h:B.h,seed:i+2});}
+    else if(e.t==='roll')obs.push({k:'roll',x:x,w:B.w,h:B.h,seed:i*9,spin:0,vy:0});
+    else if(e.t==='gap')obs.push({k:'gap',x:x,w:1.7*R,h:0.65*R});
+    else if(e.t==='kicker'){obs.push({k:'kicker',x:x,w:K.w,h:K.h});obs.push({k:'rock',x:x+K.w*1.15,w:B.w,h:B.h,seed:i*11,airGate:1});}
+    else if(e.t==='coyote')obs.push({k:'coyote',x:x,w:C.w,h:C.h,seed:i,ph:i});
+    else if(e.t==='grom')obs.push({k:'grom',x:x,w:G.w,h:G.h,seed:i});
+  }
+  return obs;
+}
+function reset(keepAttempts){
+  if(!keepAttempts)attempts=0;
+  ensureBackdrop(curLevel().bg);
+  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
+  var rx=rideX();
+  S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0};
+  /* plant board exactly on surface line after restart */
+  S.p.y=gY(S.p.x);S.p.on=true;S.p.vy=0;
+  stopMusic();syncUI();
+}
+function score(){return Math.floor(S.dist/10)+S.cleared*25+(S.done?250:0);}
+function jump(){
+  if(S.mode!=='play')return;
+  if(S.p.on||S.coyote>0){S.p.vy=JV;S.p.on=false;S.coyote=0;S.buf=0;S.holding=true;jumpSFX();return;}
+  S.buf=BUFFER;
+}
+function holdSet(v){S.holding=!!v;if(!v&&S.p.vy<0)S.p.vy*=HOLD_CUT;}
+function spawnPuff(x,y,n,col){for(var i=0;i<n;i++)S.parts.push({x:x,y:y,vx:(Math.random()-.5)*140,vy:-50-Math.random()*90,l:.35+Math.random()*0.45,c:col||'#fff'});}
+function crash(why){
+  if(S.mode!=='play')return;
+  S.mode='over';S.fail=why||'Wipeout';S.pop=null;S.flash=-.2;S.crashT=0;crashSFX();stopMusic();spawnPuff(S.p.x,S.p.y-10,22,'#fff');
+  var sc=score();if(sc>pb){pb=sc;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
+  setTimeout(function(){if(S.mode==='over'){attempts++;reset(true);S.mode='play';startMusic();syncUI();}},260);
+}
+
+function step(dt){
+  if(S.mode!=='play'&&S.mode!=='over')return;
+  if(S.mode==='over'){S.crashT=(S.crashT||0)+dt;S.p.vy+=G*0.35*dt;S.p.y+=S.p.vy*dt*0.35;return;}
+  S.t+=dt;S.landT=Math.max(0,S.landT-dt);S.pulse=Math.max(0,S.pulse-dt*3);S.nearT=Math.max(0,S.nearT-dt);
+  if(S.flash<0)S.flash=Math.min(0,S.flash+dt);
+  if(S.pop){S.pop.l-=dt;if(S.pop.l<=0)S.pop=null;}
+  var p=S.p,gy=gY(p.x);
+  if(p.on){S.coyote=COYOTE;p.y=gy;p.vy=0;}
+  else{
+    S.coyote=Math.max(0,S.coyote-dt);
+    var grav=G;if(S.holding&&p.vy<0)grav*=.55;
+    p.vy+=grav*dt;p.y+=p.vy*dt;
+    if(p.y>=gy&&p.vy>=0){p.y=gy;p.vy=0;p.on=true;S.landT=.2;landSFX();spawnPuff(p.x,p.y,8,'#e8f2fb');if(S.buf>0){S.buf=0;jump();}}
+  }
+  S.buf=Math.max(0,S.buf-dt);
+  S.dist+=SPD*dt;
+  if(p.on){S.trail.push({x:p.x-10,y:p.y-1,l:.45});if(S.trail.length>40)S.trail.shift();}
+  for(var ti=S.trail.length-1;ti>=0;ti--){S.trail[ti].l-=dt;S.trail[ti].x-=SPD*dt*.12;if(S.trail[ti].l<=0)S.trail.splice(ti,1);}
+  for(var i=S.parts.length-1;i>=0;i--){var q=S.parts[i];q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=420*dt;q.l-=dt;if(q.l<=0)S.parts.splice(i,1);}
+  for(i=0;i<S.obs.length;i++){
+    var o=S.obs[i],ox=o.x-S.dist+p.x;
+    if(o.k==='roll'){
+      o.spin=(o.spin||0)+dt*4;
+      var top=gY(ox)-o.h;
+      if(ox>p.x-22&&ox<p.x+28&&p.y>top&&p.y<top+o.h+12){crash('Rolling rock');return;}
+      continue;
+    }
+    if(o.k==='gap'){
+      if(ox<p.x+8&&ox+o.w>p.x-8&&p.on&&p.y>=gY(p.x)-3){crash('Fell in gap');return;}
+      continue;
+    }
+    if(o.k==='kicker'){
+      if(ox<p.x+18&&ox+o.w*0.55>p.x&&p.on){p.on=false;p.vy=JV*1.08;S.holding=true;jumpSFX();spawnPuff(p.x,p.y,5,'#fff');}
+      continue;
+    }
+    if(o.k==='coyote'||o.k==='grom'){
+      var hh=o.k==='coyote'?28:40,topA=gY(ox)-hh;
+      if(!o.cleared&&ox+o.w<p.x-8){o.cleared=1;S.cleared++;}
+      if(ox<p.x+16&&ox+o.w>p.x-12&&p.y>topA+4&&p.y<gY(ox)+2){crash(o.k==='coyote'?'Coyote':'Grom');return;}
+      continue;
+    }
+    // rock
+    var topR=gY(ox+o.w/2)-o.h;
+    if(!o.cleared&&ox+o.w<p.x-8){o.cleared=1;S.cleared++;}
+    var hitL=p.x-14,hitR=p.x+16,hitB=p.y,hitT=p.y-(p.on?12:38);
+    if(ox<hitR&&ox+o.w>hitL){
+      if(hitB>topR+2&&hitT<gY(ox+o.w/2)+2){
+        if(o.airGate&&!p.on&&hitB<topR+24){if(!o.near){o.near=1;S.nearT=.4;S.pop={txt:'AIR!',l:.7};beep(880,.05,'square',.05);}}
+        else{crash('Hit rock');return;}
+      }else if(!o.near&&!p.on&&hitB<=topR+4&&hitB>topR-40){o.near=1;S.nearT=.45;S.pop={txt:'+NEAR',l:.75};beep(1200,.04,'square',.06);}
+    }
+  }
+  if(S.dist>=L1_LEN){
+    S.mode='clear';S.done=true;stopMusic();beep(660,.1,'square',.08);beep(880,.12,'square',.08);
+    var sc2=score();if(sc2>pb){pb=sc2;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
+  }
+}
+
+/* —— scene (resort backdrop + sparse FG pines) —— */
+function drawSky(){
+  var sky=(curLevel().sky)||THEME.sky;
+  var g=cx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,sky[0]);g.addColorStop(0.55,sky[1]);g.addColorStop(1,sky[2]);
+  cx.fillStyle=g;cx.fillRect(0,0,W,H);
+  /* soft sun only on bright day themes — skipped while backdrop covers */
+  if(!ART.bg[curLevel().bg]&&levelIdx===0){
+    var sx=W*0.78,sy=50-OY*0.08;
+    cx.fillStyle='rgba(255,236,180,.55)';cx.beginPath();cx.arc(sx,sy,22,0,7);cx.fill();
+    cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(sx,sy,11,0,7);cx.fill();
+  }
+}
+function drawBackdrop(dist){
+  var file=curLevel().bg,img=ART.bg[file];
+  if(!img){
+    /* plain sky already drawn — optional soft ridge while waiting */
+    cx.fillStyle='rgba(74,106,136,.35)';cx.beginPath();cx.moveTo(-20,GROUND+90);
+    for(var i=0;i<=8;i++)cx.lineTo(i*(W/8),GROUND-10-Math.abs(Math.sin(i*0.9+(dist*0.001)))*36);
+    cx.lineTo(W+20,GROUND+90);cx.closePath();cx.fill();
+    return;
+  }
+  /* Cover height without distortion; bottom-anchored; tile X. Use natural image size (bluebird may be lightly downscaled). */
+  var srcW=img.naturalWidth||img.width||780,srcH=img.naturalHeight||img.height||520;
+  var viewTop=-OY,viewBot=-OY+H;
+  var sc=H/srcH;
+  var dw=srcW*sc,dh=srcH*sc;
+  var yBot=GROUND+Math.min(120,H*0.18);
+  var y=yBot-dh;
+  if(y>viewTop)y=viewTop;
+  if(y+dh<viewBot)y=viewBot-dh;
+  var off=(dist*0.045)%dw,x;
+  for(x=-off-dw;x<W+dw;x+=dw)cx.drawImage(img,0,0,srcW,srcH,x,y,dw,dh);
+}
+function drawNearSnow(){
+  /* Soft vertical fill only — no groomer strokes, no ovals (Ted: no notebook lines) */
+  var bot=-OY+H;
+  var top=Math.max(GROUND+70,bot-H*(isLand()?0.22:0.28));
+  var g=cx.createLinearGradient(0,top,0,bot);
+  g.addColorStop(0,'rgba(217,230,240,0)');
+  g.addColorStop(0.35,'rgba(200,216,230,.5)');
+  g.addColorStop(1,'rgba(176,196,214,.95)');
+  cx.fillStyle=g;cx.fillRect(-40,top,W+80,bot-top+4);
+}
+function worldBottom(){return Math.max(-OY+H+20,GROUND+240);}
+function draw(){
+  cx.setTransform(scale,0,0,scale,0,0);
+  drawSky();
+  cx.save();cx.translate(0,OY);
+  drawBackdrop(S?S.dist:0);
+  /* snow pack (play lane) */
+  cx.beginPath();cx.moveTo(-40,worldBottom());
+  for(var gx=-40;gx<=W+40;gx+=8)cx.lineTo(gx,gY(gx));
+  cx.lineTo(W+40,worldBottom());cx.closePath();
+  cx.fillStyle=THEME.snow;cx.fill();
+  cx.strokeStyle='#9eb6cc';cx.lineWidth=2;cx.beginPath();
+  for(gx=-40;gx<=W+40;gx+=8){var gy=gY(gx);if(gx===-40)cx.moveTo(gx,gy);else cx.lineTo(gx,gy);}cx.stroke();
+  /* no ruled corduroy / drift ovals — near band is soft gradient only */
+  drawNearSnow();
+  if(S){
+    /* at most 1–2 full-detail atlas pines per screen */
+    var midL=rideX()-80,midR=Math.min(W-30,rideX()+W*0.5);
+    var shown=0;
+    for(var ti=0;ti<6&&shown<2;ti++){
+      var nx=((ti*620+40)-(S.dist*0.95)%3720);
+      if(nx<-60||nx>W+60)continue;
+      if(nx>midL&&nx<midR)continue;
+      drawPine(nx,gY(nx)+8,shown===0?'tall':'small');
+      shown++;
+    }
+    /* live vertical snowfall on top of backdrop (storm has faint baked flakes too) */
+    for(var si=0;si<18;si++){
+      var fx=((si*113+(S.dist*0.12))%(W+20))-10;
+      var fy=((si*71+S.t*55)%(H+40))-OY-20;
+      cx.fillStyle='rgba(255,255,255,.4)';cx.fillRect(fx,fy,2,2);
+    }
+  }
+
+  if(!S){cx.restore();return;}
+  var p=S.p;
+  // carve trail
+  cx.lineCap='round';
+  for(var tr=1;tr<S.trail.length;tr++){
+    var a=S.trail[tr-1],b=S.trail[tr];
+    cx.globalAlpha=Math.max(0,b.l*1.6);cx.strokeStyle=THEME.accent;cx.lineWidth=2.4;
+    cx.beginPath();cx.moveTo(a.x,a.y);cx.lineTo(b.x,b.y);cx.stroke();
+  }
+  cx.globalAlpha=1;
+  /* no horizontal speed streaks — snow only falls vertically */
+
+  S.obs.forEach(function(o){
+    var ox=o.x-S.dist+p.x;if(ox<-140||ox>W+140)return;
+    if(o.k==='rock')drawBoulder(ox,gY(ox+o.w/2),o.w,o.h,o.seed||1,0);
+    else if(o.k==='roll')drawBoulder(ox,gY(ox+o.w/2),o.w,o.h,o.seed||2,o.spin||0);
+    else if(o.k==='gap'){cx.fillStyle='#1a3048';cx.fillRect(ox,gY(ox)+1,o.w,90);cx.fillStyle='#3a5068';cx.fillRect(ox-8,gY(ox)-5,10,12);cx.fillRect(ox+o.w-2,gY(ox+o.w)-5,10,12);cx.fillStyle='rgba(0,0,0,.2)';cx.fillRect(ox,gY(ox)+1,o.w,14);}
+    else if(o.k==='kicker')drawKicker(ox,gY(ox),o.w,o.h);
+    else if(o.k==='coyote')drawCoyote(ox,gY(ox),S.t,o.ph||0,o.w);
+    else if(o.k==='grom')drawGrom(ox,gY(ox),S.t,o.w);
+  });
+
+  /* plant board onto surface line; light slope tip only (big rotate lifts the deck visually) */
+  if(p.on)p.y=gY(p.x);
+  var plant=p.on?1.0:0;
+  cx.save();cx.translate(p.x,p.y+plant);cx.rotate(p.on?slopeAt(p.x)*0.08:0);if(S.landT>0)cx.scale(1+0.05*S.landT,1-0.08*S.landT);paintRider(poseFor(),S.t);cx.restore();
+  S.parts.forEach(function(q){cx.globalAlpha=Math.max(0,q.l*2);cx.fillStyle=q.c;cx.fillRect(q.x,q.y,3.5,3.5);});cx.globalAlpha=1;
+  if(S.pulse>0){cx.fillStyle='rgba(232,119,46,'+(S.pulse*0.07)+')';cx.fillRect(-30,-OY,W+60,90);}
+  if(S.flash<0){cx.fillStyle='rgba(180,220,255,'+(-S.flash)+')';cx.fillRect(-30,-OY,W+60,H);}
+
+  // HUD — no plate/scrim box; readable via stroke + soft shadow only
+  var hy=-OY+(OY>12?32:0),barY=82+hy;
+  if(!menuOpen()){
+    var barX=12,barW=Math.min(230,W*0.55),prog=Math.min(1,S.dist/L1_LEN);
+    function hudText(txt,x,y,font,col){
+      cx.font=font;cx.lineJoin='round';cx.miterLimit=2;
+      /* soft glow only — no plate, no hard stroke box */
+      cx.shadowColor='rgba(0,0,0,.85)';cx.shadowBlur=12;cx.shadowOffsetX=0;cx.shadowOffsetY=1;
+      cx.strokeStyle='rgba(4,10,20,.55)';cx.lineWidth=2.5;cx.strokeText(txt,x,y);
+      cx.fillStyle=col;cx.fillText(txt,x,y);
+      cx.shadowBlur=0;cx.shadowColor='transparent';
+    }
+    cx.textAlign='left';
+    hudText('Score '+score(),12,26+hy,'800 24px system-ui,sans-serif','#fff');
+    hudText('Attempt '+Math.max(1,attempts+(S.mode==='play'||S.mode==='over'?1:0)),12,48+hy,'800 13px system-ui,sans-serif','#e8f2ff');
+    hudText(curLevel().id+' '+curLevel().name,12,70+hy,'800 16px system-ui,sans-serif','#fff');
+    /* soft progress track (rounded via path) — not a HUD plate */
+    cx.fillStyle='rgba(0,0,0,.35)';rr(barX,barY,barW,12,6);cx.fill();
+    cx.fillStyle='#2bd17e';rr(barX,barY,Math.max(6,barW*prog),12,6);cx.fill();
+    hudText(Math.floor(prog*100)+'%',barX+barW+8,barY+11,'800 13px system-ui,sans-serif','#fff');
+  }
+  if(S.mode==='play'&&S.pop){
+    var qx=Math.min(W-40,p.x+86),qy=Math.max(barY+26,Math.min(p.y-78,barY+50));
+    cx.font='800 16px system-ui,sans-serif';cx.textAlign='center';cx.strokeStyle='#14213d';cx.lineWidth=4;cx.strokeText(S.pop.txt,qx,qy);cx.fillStyle='#fff';cx.fillText(S.pop.txt,qx,qy);cx.textAlign='left';
+  }
+  /* Skip canvas banner while HTML menu is open — avoids overlap with L1 · First Tracks */
+  if(!menuOpen()&&(S.mode==='ready'||S.mode==='pause'||S.mode==='clear')){
+    var title=S.mode==='ready'?'TAP JUMP':(S.mode==='pause'?'PAUSED':'CLEAR '+score());
+    cx.fillStyle='rgba(8,16,32,.86)';rr(W/2-145,42,290,S.mode==='clear'?112:90,14);cx.fill();cx.strokeStyle='#ffd84a66';cx.lineWidth=2;cx.stroke();
+    cx.fillStyle='#fff';cx.font='800 26px system-ui,sans-serif';cx.textAlign='center';cx.fillText(title,W/2,82);
+    cx.font='700 14px system-ui,sans-serif';cx.fillStyle='#9fd3ff';cx.fillText(S.mode==='clear'?'Best '+pb+' · Attempt '+attempts:'Hold JUMP for height · carve the line',W/2,110);cx.textAlign='left';
+  }
+  if(S.mode==='over'){
+    cx.fillStyle='rgba(8,16,32,.9)';rr(W/2-135,36,270,100,14);cx.fill();cx.strokeStyle='#e8772e88';cx.stroke();
+    cx.fillStyle='#fff';cx.font='800 24px system-ui,sans-serif';cx.textAlign='center';cx.fillText('WIPEOUT',W/2,74);
+    cx.font='700 14px system-ui,sans-serif';cx.fillStyle='#ffd84a';cx.fillText((S.fail||'')+' · retrying…',W/2,100);cx.textAlign='left';
+  }
+  cx.restore();
+}
+
+function resize(){
+  dpr=window.devicePixelRatio||1;cv.width=innerWidth*dpr;cv.height=innerHeight*dpr;
+  /* Landscape: look-ahead; portrait: frame run lower so belly isn't empty white */
+  var landGuess=innerWidth>innerHeight*1.15;
+  scale=Math.min(cv.height/(GROUND+(landGuess?210:150)),cv.width/(landGuess?460:340));
+  W=cv.width/scale;H=cv.height/scale;
+  var land=isLand();
+  OY=H*(land?0.56:0.66)-GROUND; /* steady cam — portrait sits lower */
+  if(land){if(OY<18)OY=18;}else if(OY<48)OY=48;
+  if(S&&S.p){S.p.x=rideX();if(S.p.on)S.p.y=gY(S.p.x);}
+}
+function syncUI(){
+  var play=S&&(S.mode==='play'||S.mode==='over'||S.mode==='clear'||S.mode==='pause');
+  document.getElementById('jumpB').style.display=play?'block':'none';
+  document.getElementById('menuB').style.display=play?'block':'none';
+  document.getElementById('mute').textContent=muted?'Mute':'♪';
+}
+function openMenu(){
+  var el=document.getElementById('menu');el.style.display='block';
+  var lv=curLevel();
+  if(menuSheet==='how'){
+    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>One-button JUMP — hold for height</li><li>Coyote time + buffer for fair taps</li><li>Kickers launch you — air-dodge rocks</li><li>Wipeout restarts in under 300ms</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
+  }else if(menuSheet==='levels'){
+    var rows=LEVELS.map(function(L,i){return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+'</b> — resort backdrop</p>';}).join('');
+    el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same chart; one backdrop per level.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
+  }else{
+    el.innerHTML='<div class="wrap"><h1>BOULDER DODGE</h1><div class="hi">HIGH SCORE · '+pb+'</div><button type="button" class="playBig" id="playGo">PLAY</button><div class="lvl">'+lv.id+' · '+lv.name+'</div><div class="sheetNav"><button type="button" data-sheet="how"><span class="ic">?</span>How</button><button type="button" data-sheet="levels"><span class="ic">L</span>Levels</button></div><p class="tag">Offline · v'+VER+'</p></div>';
+  }
+  if(S&&S.mode==='play'){S.mode='pause';stopMusic();}
+}
+function closeMenu(){document.getElementById('menu').style.display='none';menuSheet=null;if(S&&S.mode==='pause'){S.mode='play';startMusic();}}
+function frame(ts){
+  requestAnimationFrame(frame);
+  if(!last)last=ts;var d=Math.min(.05,(ts-last)/1000);last=ts;
+  tickMusic(ts);
+  if(S&&(S.mode==='play'||S.mode==='over')){acc+=d;while(acc>=DT){step(DT);acc-=DT;}} else acc=0;
+  try{draw();}catch(err){console&&console.warn(err);}
+}
+
+function canvasPress(e){
+  e.preventDefault();ensureAC();
+  if(S.mode==='ready'){S.mode='play';startMusic();syncUI();jump();return;}
+  if(S.mode==='clear'){setLevel(levelIdx+1);attempts=0;reset(false);S.mode='play';startMusic();syncUI();return;}
+  if(S.mode==='pause'){S.mode='play';startMusic();return;}
+  jump();
+}
+function canvasRelease(){holdSet(false);}
+cv.addEventListener('pointerdown',canvasPress);cv.addEventListener('pointerup',canvasRelease);cv.addEventListener('pointercancel',canvasRelease);
+document.getElementById('jumpB').addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();canvasPress(e);});
+document.getElementById('jumpB').addEventListener('pointerup',canvasRelease);
+document.getElementById('menuB').onclick=function(){openMenu();};
+document.getElementById('pause').onclick=function(){if(!S)return;if(S.mode==='play'){S.mode='pause';stopMusic();}else if(S.mode==='pause'){S.mode='play';startMusic();}syncUI();};
+document.getElementById('mute').onclick=function(){muted=!muted;try{localStorage.setItem('bd9.mute',muted?'1':'0')}catch(e){}if(muted)stopMusic();else if(S&&S.mode==='play')startMusic();syncUI();};
+document.getElementById('menu').addEventListener('click',function(e){
+  var b=e.target.closest('button');if(!b)return;
+  if(b.id==='playGo'){closeMenu();attempts++;reset(true);S.mode='play';startMusic();syncUI();return;}
+  if(b.id==='sheetBack'){menuSheet=null;openMenu();return;}
+  if(b.dataset.sheet){menuSheet=b.dataset.sheet;openMenu();}
+});
+addEventListener('keydown',function(e){if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();canvasPress(e);}});
+addEventListener('keyup',function(e){if(e.code==='Space'||e.code==='ArrowUp')holdSet(false);});
+addEventListener('resize',resize);addEventListener('orientationchange',function(){setTimeout(resize,50);});
+
+window.BoulderDodge={
+  version:VER,
+  startLevel:function(i){
+    if(typeof i==='number')setLevel(i);
+    closeMenu();attempts++;reset(true);S.mode='play';startMusic();syncUI();
+  },
+  start:function(){if(S.mode==='ready'){S.mode='play';startMusic();syncUI();}},
+  openMenu:openMenu,getState:function(){return S.mode;},getScore:score,
+  _test:{
+    state:function(){return S;},step:step,jump:jump,draw:draw,reset:reset,crash:crash,
+    setLevel:setLevel,curLevel:curLevel,ensureBackdrop:ensureBackdrop,
+    consts:{DT:DT,SPD:SPD,L1_LEN:L1_LEN,RIDER_H_FRAC:RIDER_H_FRAC,RIDER_LOCAL_H:RIDER_LOCAL_H},
+    measureRider:function(){
+      var playCss=innerHeight,riderCss=RIDER_H_FRAC*playCss;
+      return{
+        riderHFrac:RIDER_H_FRAC,
+        riderLocalH:RIDER_LOCAL_H,
+        riderSc:riderSc(),
+        artSc:artSc(),
+        artOk:!!ART.ok,
+        bgOk:!!ART.bg[curLevel().bg],
+        bgFile:curLevel().bg,
+        level:curLevel().id,
+        worldRiderH:worldRiderH(),
+        playfieldGameH:H,
+        playfieldCssPx:playCss,
+        riderCssPx:riderCss,
+        riderPxOverPlayfieldPx:riderCss/playCss,
+        orientation:isLand()?'landscape':'portrait'
+      };
+    }
+  }
+};
+
+resize();reset(false);openMenu();
+bootArt();
+requestAnimationFrame(frame);
+try{navigator.serviceWorker&&navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){if((r.scope||'').indexOf('/arcade/boulder-dodge')>=0)r.unregister();});});}catch(e){}
+})();
+</script>
+</body>
+</html>

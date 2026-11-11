@@ -1,0 +1,194 @@
+{
+  "config": {
+    "argv": [
+      "/exec-daemon/node",
+      "/agent/repos/stomp-preview/arcade/terrain-park-next/node_modules/.bin/playwright",
+      "test",
+      "--project=phone"
+    ],
+    "configFile": "/agent/repos/stomp-preview/arcade/terrain-park-next/playwright.config.js",
+    "rootDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/test-evidence/test-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "phone",
+        "name": "phone",
+        "testDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 120000
+      },
+      {
+        "outputDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/test-evidence/test-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop",
+        "name": "desktop",
+        "testDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 120000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/test-evidence/test-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "phone",
+        "testDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
+        "snapshotDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
+        "testIgnore": [],
+        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
+        "timeout": 120000,
+        "use": {
+          "baseURL": "http://127.0.0.1:8788/arcade/terrain-park-next/",
+          "trace": "off",
+          "video": "off",
+          "screenshot": "only-on-failure",
+          "browserName": "chromium",
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "deviceScaleFactor": 2,
+          "isMobile": true,
+          "hasTouch": true,
+          "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": "phone"
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-evidence/playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.65.0",
+    "workers": 1,
+    "webServer": {
+      "command": "node arcade/terrain-park-next/scripts/static-server.mjs 8788",
+      "url": "http://127.0.0.1:8788/arcade/terrain-park-next/index.html",
+      "reuseExistingServer": true,
+      "timeout": 120000,
+      "cwd": "/agent/repos/stomp-preview"
+    }
+  },
+  "suites": [
+    {
+      "title": "terrain-park.spec.js",
+      "file": "terrain-park.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Terrain Park v0.5.1-next",
+          "file": "terrain-park.spec.js",
+          "line": 29,
+          "column": 6,
+          "specs": [
+            {
+              "title": "loads, menus, legend, mute, saves, fail-tests",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 120000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "phone",
+                  "projectName": "phone",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 38957,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [
+                        {
+                          "text": ""
+                        },
+                        {
+                          "text": ""
+                        }
+                      ],
+                      "retry": 0,
+                      "startTime": "2026-11-11T15:14:32.546Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "65cf716cf061a72b2aa1-839c1a6a533cb39b1ffb",
+              "file": "terrain-park.spec.js",
+              "line": 30,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-11T15:14:32.013Z",
+    "duration": 39627.896,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

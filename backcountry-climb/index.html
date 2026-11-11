@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1c28">
+<title>Backcountry Climb — concept mocks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#07141c; --ink:#e8f2f6; --muted:#8aa3b0;
+    --mint:#5ec4a8; --amber:#f0b429; --ice:#b9d8e8; --coral:#e07a5f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);
+    font-family:Sora,Segoe UI,sans-serif}
+  body{padding:28px 16px 64px}
+  header{max-width:980px;margin:0 auto 22px}
+  header h1{font-family:Syne,Sora,sans-serif;font-weight:800;font-size:clamp(28px,5vw,42px);
+    letter-spacing:-.03em;margin:0 0 8px}
+  header p{margin:0;color:var(--muted);max-width:62ch;line-height:1.45;font-size:14px}
+  .note{margin-top:10px;font-size:12px;color:#6d8796}
+  .note strong{color:var(--amber);font-weight:700}
+  .gallery{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;max-width:1600px;margin:0 auto}
+  .phone{flex:0 0 auto}
+  .phone h2{font-family:Syne,sans-serif;font-size:14px;font-weight:700;margin:0 0 8px;
+    color:var(--ice);letter-spacing:.04em;text-transform:uppercase}
+  canvas.frame{display:block;border-radius:28px;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);background:#0b1c28;touch-action:none}
+  .solo{display:flex;justify-content:center;padding-top:8px}
+  .solo canvas.frame{box-shadow:0 22px 60px rgba(0,0,0,.55)}
+  .tag{position:fixed;left:10px;bottom:8px;z-index:5;font:11px/1.3 Sora,sans-serif;
+    color:rgba(232,242,246,.4);pointer-events:none}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <h1>Backcountry Climb</h1>
+  <p>Concept mocks only — uphill electric snowmobile. Steady locked side-scroll (no camera tilt — see CONCEPT.md). Combines Terrain Park climb features with Boulder Dodge descending hazards.</p>
+  <p class="note">Franz 3D art set v1 (atlas) — ride pose = 0.10 × playfield height (global ART_SCALE). Vector fallback if art fails. Pattern feel: Hill Climb Racing + Geometry Dash fairness. No copied IP.</p>
+</header>
+<div id="root" class="gallery"></div>
+<div class="tag">MOCK · concept · no playable build · &lt;350KB tip target</div>
+<script>
+'use strict';
+/**
+ * Backcountry Climb — canvas phone mocks
+ * Native frame: 390×844 portrait · 844×390 landscape
+ * World scale locked to HUMAN_H_FRAC (see constants) — sled/rider/pines/boulders/kickers.
+ */
+
+const SHOTS = [
+  {id:'title',      label:'01 · Title', w:390, h:844},
+  {id:'run',        label:'02 · Mid-run · boulders incoming', w:390, h:844},
+  {id:'rail',       label:'03 · Nose-lift hop onto rail', w:390, h:844},
+  {id:'kicker',     label:'04 · Uphill kicker over boulder', w:390, h:844},
+  {id:'upgrade',    label:'05 · Garage upgrades', w:390, h:844},
+  {id:'summit',     label:'06 · Summit finish', w:390, h:844},
+  {id:'landscape',  label:'07 · Landscape · centered sled', w:844, h:390}
+];
+
+const C = {
+  sky0:'#071820', sky1:'#123548', sky2:'#3d6f86', sky3:'#c5dce8',
+  far:'#1a3344', mid:'#254556', near:'#315868',
+  snow:'#eef6fb', shade:'#c9dbe8', deep:'#9bb4c6',
+  ice:'#b9d8e8', mint:'#5ec4a8', amber:'#f0b429', coral:'#e07a5f',
+  ink:'#0b1c28', white:'#fff',
+  sled:'#1a3644', sledHi:'#2b5568', sledEdge:'#0e222c',
+  track:'#1a1a1e', ski:'#f2f6fa', skiEdge:'#7a90a0',
+  charge:'#5ec4a8', warn:'#f0b429', rail:'#8a96a3',
+  pine:'#1f4036', rider:'#121820'
+};
+
+/**
+ * World scale lock (Ted) — never grow actors to show detail.
+ * Standing / ride human = HUMAN_H_FRAC of playfield height (portrait AND landscape).
+ * Atlas frames share one global ART_SCALE = HUMAN_PX / RIDER_ATLAS_H.
+ * CAM_ROT stays 0 (steady cam); vehicle pitches to terrain like Hill Climb.
+ */
+const HUMAN_H_FRAC = 0.10;          // mid of 0.09–0.11
+const HUMAN_H_FRAC_MIN = 0.09;
+const HUMAN_H_FRAC_MAX = 0.11;
+const RIDER_ATLAS_H = 85;           // ride pose CSS px at atlas native÷2 (design ruler)
+const SLED_LEN_X_HUMAN = 1.5;       // sled length / standing human height
+const SLED_H_X_HUMAN = 0.67;        // 1.2 m / ~1.8 m
+const SLED_LEN_U = 106;             // local draw units nose→tail (vector fallback)
+const SLED_H_U = 42;                // local draw units track→hood top
+const PINE_H_U = 88;                // pine() height at s=1 (vector)
+const PINE_H_X_HUMAN_MIN = 1.5;
+const PINE_H_X_HUMAN_MAX = 2.5;
+const BOULDER_R_X_HUMAN = { S:0.18, M:0.28, L:0.36, XL:0.48 }; // radius vs human
+const KICKER_H_X_HUMAN = 1.15;      // lip height ~2 m
+const ANIMAL_H_X_HUMAN = { coyote:0.45, bear:0.85, moose:1.35 };
+const CAM_ROT = 0;                  // ALWAYS 0
+
+let PW=390, PH=844, PAD=16, PLAY_Y=523, CTRL_TOP=716;
+let HUMAN_PX=84, ART_SCALE=1, SLED_SCALE=1.19, SLED_LEN_PX=126, SLED_H_PX=56;
+let PINE_S=1, BOULDER_R={S:15,M:24,L:30,XL:40}, KICKER_AMP=97;
+
+function setFrame(w,h){
+  PW=w; PH=h; PAD=Math.round(Math.min(w,h)*0.042);
+  PLAY_Y=Math.round(h*0.62);
+  CTRL_TOP = w>h ? (h-76) : (h-128);
+  // One global sprite factor from playfield height — portrait and landscape.
+  HUMAN_PX = PH * HUMAN_H_FRAC;
+  ART_SCALE = HUMAN_PX / RIDER_ATLAS_H; // ~1 @844, ~0.46 @390
+  SLED_LEN_PX = HUMAN_PX * SLED_LEN_X_HUMAN;
+  SLED_H_PX = HUMAN_PX * SLED_H_X_HUMAN;
+  SLED_SCALE = SLED_LEN_PX / SLED_LEN_U;
+  PINE_S = HUMAN_PX / PINE_H_U;
+  BOULDER_R = {
+    S: HUMAN_PX * BOULDER_R_X_HUMAN.S,
+    M: HUMAN_PX * BOULDER_R_X_HUMAN.M,
+    L: HUMAN_PX * BOULDER_R_X_HUMAN.L,
+    XL: HUMAN_PX * BOULDER_R_X_HUMAN.XL
+  };
+  KICKER_AMP = HUMAN_PX * KICKER_H_X_HUMAN;
+  window.__BC_SCALE = {
+    CAM_ROT, HUMAN_H_FRAC, HUMAN_H_FRAC_MIN, HUMAN_H_FRAC_MAX,
+    RIDER_ATLAS_H, ART_SCALE,
+    PW, PH, PLAY_Y, HUMAN_PX, SLED_LEN_PX, SLED_H_PX, SLED_SCALE,
+    SLED_LEN_X_HUMAN, SLED_H_X_HUMAN, SLED_LEN_U, SLED_H_U,
+    PINE_S, PINE_H_X_HUMAN_MIN, PINE_H_X_HUMAN_MAX, PINE_H_U,
+    BOULDER_R, BOULDER_R_X_HUMAN, KICKER_AMP, KICKER_H_X_HUMAN,
+    ANIMAL_H_X_HUMAN,
+    ridePosePx: RIDER_ATLAS_H * ART_SCALE,
+    seatedRiderLocalH: 26,
+    seatedRiderPx: 26 * (SLED_LEN_PX / SLED_LEN_U)
+  };
+}
+
+const params=new URLSearchParams(location.search);
+const solo=params.get('shot');
+const FORCE_FAIL_ART = params.get('failArt')==='1';
+const BG_OVERRIDE = (params.get('bg')||'').toLowerCase(); // storm | alpenglow
+const root=document.getElementById('root');
+const hdr=document.getElementById('hdr');
+
+/**
+ * Franz 3D art atlases (2× DPR). Native CSS = atlas_px÷2; on-screen = native × ART_SCALE.
+ * One global ART_SCALE from playfield height (ride = 0.10×PH). Bottom-aligned.
+ * Sled atlas faces left → flipX for climb-right.
+ */
+const ART_BASE = 'art/';
+const ART = {
+  ready:false,
+  failed:false,
+  mode:'pending', // 'atlas' | 'vector'
+  rider:null,
+  world:null
+};
+/** Resort backdrop styles (780×520 opaque, tileable L/R). storm eager; alpenglow lazy. */
+const BG = {
+  storm:null,
+  alpenglow:null,
+  alpenglowLoading:false,
+  alpenglowTried:false
+};
+const BG_NATIVE_W = 780, BG_NATIVE_H = 520;
+/** Alternate by run/level — storm for climb/kicker, alpenglow for rail/landscape/title. */
+const SHOT_BG = {
+  title:'alpenglow', run:'storm', rail:'alpenglow',
+  kicker:'storm', upgrade:null, summit:'alpenglow', landscape:'alpenglow'
+};
+/** Native atlas CSS sizes (w/2,h/2). Multiply by ART_SCALE for on-screen. */
+const HIT = {
+  sled:{w:127.5,h:71.5},
+  boulder:{w:73.5,h:65},
+  kicker:{w:107.5,h:67.5},
+  rail:{w:67.5,h:42.5},
+  pine_tall:{w:101,h:187.5},
+  pine_small:{w:67,h:135},
+  rider_ride:{w:72.5,h:85}
+};
+function hitSize(name){
+  const b=HIT[name]||{w:40,h:40};
+  return {w:b.w*ART_SCALE, h:b.h*ART_SCALE};
+}
+
+function loadImage(src){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(new Error('img '+src));
+    img.src=src;
+  });
+}
+function loadAtlas(jsonPath, imgPath){
+  return fetch(jsonPath,{cache:'no-store'}).then(r=>{
+    if(!r.ok) throw new Error('json '+jsonPath);
+    return r.json();
+  }).then(meta=>loadImage(imgPath).then(img=>({meta, img, frames:meta.frames})));
+}
+function publishArtProbe(){
+  window.__BC_ART={
+    mode:ART.mode, ready:ART.ready, HIT, forcedFail:FORCE_FAIL_ART,
+    riderFrames:ART.rider?Object.keys(ART.rider.frames):[],
+    worldFrames:ART.world?Object.keys(ART.world.frames):[],
+    bgStyles:{
+      storm:!!BG.storm,
+      alpenglow:!!BG.alpenglow,
+      alpenglowLoading:BG.alpenglowLoading
+    }
+  };
+}
+/** Lazy-load second backdrop; re-paint once ready. */
+function ensureBackdrop(key){
+  if(key!=='alpenglow') return Promise.resolve(BG[key]||null);
+  if(BG.alpenglow) return Promise.resolve(BG.alpenglow);
+  if(BG.alpenglowLoading || BG.alpenglowTried || FORCE_FAIL_ART) return Promise.resolve(null);
+  BG.alpenglowLoading=true; BG.alpenglowTried=true;
+  publishArtProbe();
+  return loadImage(ART_BASE+'bg-styles/bg-alpenglow.webp').then(img=>{
+    BG.alpenglow=img; BG.alpenglowLoading=false;
+    publishArtProbe();
+    if(typeof paintAll==='function') paintAll();
+    return img;
+  }).catch(err=>{
+    console.warn('BC alpenglow lazy fail', err);
+    BG.alpenglowLoading=false;
+    publishArtProbe();
+    return null;
+  });
+}
+function resolveBackdropKey(shotId){
+  if(BG_OVERRIDE==='storm' || BG_OVERRIDE==='alpenglow') return BG_OVERRIDE;
+  return SHOT_BG[shotId] || 'storm';
+}
+function initArt(){
+  if(FORCE_FAIL_ART){
+    ART.failed=true; ART.mode='vector';
+    BG.storm=null; BG.alpenglow=null;
+    publishArtProbe();
+    window.__BC_ART.forcedFail=true;
+    return Promise.resolve();
+  }
+  return Promise.all([
+    loadAtlas(ART_BASE+'rider-atlas.json', ART_BASE+'rider-atlas@2x.webp'),
+    loadAtlas(ART_BASE+'world-atlas.json', ART_BASE+'world-atlas@2x.webp'),
+    loadImage(ART_BASE+'bg-styles/bg-storm.webp').catch(()=>null)
+  ]).then(([rider, world, storm])=>{
+    ART.rider=rider; ART.world=world; ART.ready=true; ART.mode='atlas';
+    BG.storm=storm;
+    // lock CSS sizes from atlas (source of truth)
+    const s=world.frames.sled, b=world.frames.boulder, k=world.frames.kicker, r=world.frames.rail;
+    HIT.sled={w:s.w/2,h:s.h/2}; HIT.boulder={w:b.w/2,h:b.h/2};
+    HIT.kicker={w:k.w/2,h:k.h/2}; HIT.rail={w:r.w/2,h:r.h/2};
+    HIT.pine_tall={w:world.frames.pine_tall.w/2,h:world.frames.pine_tall.h/2};
+    HIT.pine_small={w:world.frames.pine_small.w/2,h:world.frames.pine_small.h/2};
+    HIT.rider_ride={w:rider.frames.ride.w/2,h:rider.frames.ride.h/2};
+    publishArtProbe();
+    // Kick lazy alpenglow if any visible shot needs it (or override)
+    const needAlp = BG_OVERRIDE==='alpenglow' ||
+      (solo ? resolveBackdropKey(solo)==='alpenglow'
+            : Object.keys(SHOT_BG).some(id=>SHOT_BG[id]==='alpenglow'));
+    if(needAlp) ensureBackdrop('alpenglow');
+  }).catch(err=>{
+    console.warn('BC art fallback', err);
+    ART.failed=true; ART.mode='vector';
+    window.__BC_ART={mode:'vector', ready:false, error:String(err), forcedFail:false, riderFrames:[], worldFrames:[], bgStyles:{storm:false,alpenglow:false}};
+  });
+}
+/** Bottom-aligned atlas blit at ART_SCALE. (x,y)=ground contact under sprite center.
+ *  Pitch via rotate(ang); horizontal flip via negative draw width (keeps pitch sign). */
+function blitAtlas(cx, pack, name, x, y, opts){
+  opts=opts||{};
+  if(!pack || ART.mode!=='atlas' || FORCE_FAIL_ART) return false;
+  const f=pack.frames[name];
+  if(!f) return false;
+  const w=(f.w/2)*ART_SCALE, h=(f.h/2)*ART_SCALE;
+  cx.save();
+  cx.translate(x, y);
+  if(opts.ang) cx.rotate(opts.ang);
+  if(opts.alpha!=null) cx.globalAlpha=opts.alpha;
+  if(opts.flipX) cx.drawImage(pack.img, f.x, f.y, f.w, f.h, w/2, -h, -w, h);
+  else cx.drawImage(pack.img, f.x, f.y, f.w, f.h, -w/2, -h, w, h);
+  cx.restore();
+  return true;
+}
+/** Terrain height + local slope angle (radians). Wide sample so ripples don't cancel the grade. */
+function slopeAt(x, base, amp){
+  const y=uphillY(x, base, amp);
+  const dx=Math.max(24, PW*0.04);
+  const local=Math.atan2(uphillY(x+dx,base,amp)-uphillY(x-dx,base,amp), dx*2);
+  // Prefer mean grade (wide frames dilute local dy/dx). Matches Hill-Climb body pitch.
+  const mean=-Math.atan2(amp, PW);
+  const ang=local*0.3+mean*0.7;
+  return {y, ang};
+}
+/** Steady camera — translate only (CAM_ROT stays 0). Look-ahead in x, sled at ~50% H. */
+function camFollow(sledWX, sledWY, opts){
+  opts=opts||{};
+  const lookAhead = opts.lookAhead!=null ? opts.lookAhead : PW*0.16;
+  const sledScreenY = opts.sledScreenY!=null ? opts.sledScreenY : PH*0.50; // 45–55%
+  // Aim camera at a point ahead of the sled so oncoming hazards stay in frame
+  const focusWX = sledWX + lookAhead;
+  const focusSX = opts.focusScreenX!=null ? opts.focusScreenX : PW*0.52;
+  return {
+    x: focusWX - focusSX,
+    y: sledWY - sledScreenY,
+    sledSX: sledWX - (focusWX - focusSX),
+    sledSY: sledScreenY
+  };
+}
+function withCam(cx, cam, drawFn){
+  cx.save();
+  cx.translate(-cam.x, -cam.y);
+  drawFn();
+  cx.restore();
+}
+/** Near-camera snow under the run — continues the slope (never a dark slab). */
+function drawForegroundSlope(cx, base, amp, yBottom){
+  const yTop = Math.min(yBottom-8, uphillY(PW*0.25, base, amp)+HUMAN_PX*0.08);
+  if(yBottom - yTop < 40) return;
+  // white → soft blue-white with mild depth; no dark lake/cross-section
+  cx.fillStyle=grad(cx,0,yTop,0,yBottom,[
+    [0,'rgba(238,246,251,0)'],
+    [0.18,'rgba(232,242,248,.55)'],
+    [0.55,'rgba(210,226,236,.78)'],
+    [1,'rgba(186,208,222,.92)']
+  ]);
+  cx.fillRect(0, yTop, PW, yBottom-yTop);
+  // at most 2–3 faint groomer lines that follow the slope curve
+  cx.strokeStyle='rgba(150,176,194,.28)'; cx.lineWidth=1.35; cx.lineCap='round';
+  for(let t=0;t<3;t++){
+    cx.beginPath();
+    let started=false;
+    for(let x=0;x<=PW;x+=6){
+      const y = uphillY(x,base,amp) + HUMAN_PX*(0.28+t*0.14) + Math.sin(x*0.03+t*0.7)*1.5;
+      if(y>=yBottom-4) break;
+      if(!started){ cx.moveTo(x,y); started=true; } else cx.lineTo(x,y);
+    }
+    if(started) cx.stroke();
+  }
+}
+
+/** Soft contact shadow under grounded actors. */
+function contactShadow(cx, x, y, rw, rh){
+  cx.save();
+  cx.fillStyle='rgba(8,18,28,.42)';
+  cx.beginPath();
+  cx.ellipse(x, y+1.5, rw, Math.max(3, rh), 0, 0, Math.PI*2);
+  cx.fill();
+  cx.fillStyle='rgba(8,18,28,.2)';
+  cx.beginPath();
+  cx.ellipse(x, y+1.5, rw*1.4, Math.max(4, rh*1.55), 0, 0, Math.PI*2);
+  cx.fill();
+  cx.restore();
+}
+/** Thin BEST flag seated on terrain (no label overlap with rocks/animals). */
+function drawBestFlag(cx, x, base, amp){
+  const {y, ang}=slopeAt(x, base, amp);
+  const h=HUMAN_PX*0.5;
+  cx.save();
+  cx.translate(x, y);
+  cx.rotate(ang);
+  cx.strokeStyle='rgba(240,180,41,.9)'; cx.lineWidth=1.6; cx.lineCap='round';
+  cx.beginPath(); cx.moveTo(0,0); cx.lineTo(0,-h); cx.stroke();
+  cx.fillStyle=C.amber;
+  cx.beginPath();
+  cx.moveTo(1,-h); cx.lineTo(HUMAN_PX*0.38,-h+HUMAN_PX*0.07); cx.lineTo(1,-h+HUMAN_PX*0.14);
+  cx.closePath(); cx.fill();
+  cx.fillStyle=C.ink; cx.font=`700 ${Math.max(8,Math.round(HUMAN_PX*0.12))}px Sora,sans-serif`;
+  cx.textAlign='left'; cx.textBaseline='middle';
+  cx.fillText('BEST', 3, -h+HUMAN_PX*0.07);
+  cx.restore();
+}
+
+function fontReady(){
+  if(document.fonts&&document.fonts.ready) return document.fonts.ready.catch(()=>{});
+  return Promise.resolve();
+}
+function rr(cx,x,y,w,h,r){
+  const R=Math.min(r,w/2,h/2);
+  cx.beginPath();
+  cx.moveTo(x+R,y); cx.arcTo(x+w,y,x+w,y+h,R); cx.arcTo(x+w,y+h,x,y+h,R);
+  cx.arcTo(x,y+h,x,y,R); cx.arcTo(x,y,x+w,y,R); cx.closePath();
+}
+function grad(cx,x0,y0,x1,y1,stops){
+  const g=cx.createLinearGradient(x0,y0,x1,y1);
+  for(const [t,c] of stops) g.addColorStop(t,c);
+  return g;
+}
+function clampLabelX(cx, text, x, align){
+  const w=cx.measureText(text).width;
+  if(align==='center') return Math.max(PAD+w/2, Math.min(PW-PAD-w/2, x));
+  if(align==='right') return Math.max(PAD+w, Math.min(PW-PAD, x));
+  return Math.max(PAD, Math.min(PW-PAD-w, x));
+}
+function drawFitText(cx, text, x, y, maxW, weight, size, family){
+  let s=size;
+  cx.font=`${weight} ${s}px ${family}`;
+  while(s>11 && cx.measureText(text).width>maxW){ s-=1; cx.font=`${weight} ${s}px ${family}`; }
+  cx.fillText(text, x, y);
+  return s;
+}
+
+/* ---- world (resort backdrop styles — opaque 780×520, slow far parallax) ---- */
+function drawSky(cx, theme){
+  cx.fillStyle=grad(cx,0,0,0,PH,[
+    [0, theme.sky0||C.sky0],[.55, theme.sky1||C.sky1],[1, theme.sky3||C.sky3]
+  ]);
+  cx.fillRect(0,0,PW,PH);
+}
+/**
+ * Slow far parallax backdrop. Bottom-anchored so open snow sits behind the climb.
+ * Scales uniformly to cover playfield height; tiles horizontally (seamless L/R).
+ * flipX: reserved — alpenglow keeps lodge unflipped so the summit lodge reads naturally
+ * on the right (ahead on the climb-right slope). Storm also unflipped for edge continuity.
+ */
+function drawBackdrop(cx, ox, styleKey, opts){
+  opts=opts||{};
+  const key = styleKey||'storm';
+  if(key==='alpenglow' && !BG.alpenglow) ensureBackdrop('alpenglow');
+  const img = BG[key] || BG.storm;
+  if(!img){
+    // vector fallback peaks when no backdrop yet
+    const shift=(ox*0.05)%200;
+    cx.fillStyle=C.far;
+    cx.beginPath();
+    cx.moveTo(-40, PLAY_Y+8);
+    cx.lineTo(80-shift, PLAY_Y-PH*0.22);
+    cx.lineTo(200-shift, PLAY_Y-PH*0.12);
+    cx.lineTo(340-shift, PLAY_Y-PH*0.28);
+    cx.lineTo(480-shift, PLAY_Y-PH*0.14);
+    cx.lineTo(620-shift, PLAY_Y-PH*0.24);
+    cx.lineTo(PW+40, PLAY_Y+8);
+    cx.closePath(); cx.fill();
+    return;
+  }
+  const nw=img.naturalWidth||img.width||BG_NATIVE_W;
+  const nh=img.naturalHeight||img.height||BG_NATIVE_H;
+  const sc = PH / nh; // cover height, no distortion
+  const tw = nw * sc, th = PH;
+  const y = PH - th; // bottom-anchored
+  const parallax = opts.parallax!=null ? opts.parallax : 0.045;
+  // No horizontal mirror by default — alpenglow lodge stays right and reads as
+  // summit-ahead on the climb-right slope (mirroring would flip lit windows awkwardly).
+  const flipX = !!opts.flipX;
+  // Keep landmark (lodge ~0.72 in alpenglow) near screen right while parallax scrolls.
+  const focusU = opts.focusU!=null ? opts.focusU : (key==='alpenglow' ? 0.72 : 0.5);
+  // Keep target within one tile so wide landscape frames still show the lodge.
+  const targetSX = opts.targetSX!=null ? opts.targetSX
+    : Math.min(PW*(key==='alpenglow' ? 0.68 : 0.5), tw*0.82);
+  const shift=((ox*parallax - targetSX + focusU*tw)%tw+tw)%tw;
+  for(let x=-shift-tw; x<PW+tw; x+=tw){
+    if(flipX){
+      cx.save();
+      cx.translate(x+tw, y);
+      cx.scale(-1, 1);
+      cx.drawImage(img, 0, 0, tw, th);
+      cx.restore();
+    } else {
+      cx.drawImage(img, x, y, tw, th);
+    }
+  }
+}
+/** Convenience: sky underlay (hidden when opaque backdrop present) + backdrop for a shot. */
+function drawWorldBg(cx, ox, shotId, theme){
+  const key = resolveBackdropKey(shotId);
+  const has = !!(BG[key] || BG.storm);
+  if(!has) drawSky(cx, theme||{});
+  else {
+    // thin sky wash behind in case of letterbox (shouldn't show with cover-height)
+    cx.fillStyle=(theme&&theme.sky0)||C.sky0;
+    cx.fillRect(0,0,PW,PH);
+  }
+  drawBackdrop(cx, ox, key, {});
+}
+/** Atlas pines at ART_SCALE. `s>=1.9` → pine_tall. y=ground. opts.haze for back layer. */
+function pine(cx,x,y,s,opts){
+  opts=opts||{};
+  const tall = (typeof s==='number') ? (s>=1.9) : true;
+  const alpha = opts.haze ? 0.52 : 1;
+  if(blitAtlas(cx, ART.world, tall?'pine_tall':'pine_small', x, y, {alpha})) return;
+  const sc = (typeof s==='number' ? s : 2.0) * (ART_SCALE>0?ART_SCALE:1);
+  cx.save();
+  if(opts.haze) cx.globalAlpha=0.52;
+  cx.fillStyle=C.pine;
+  cx.beginPath();
+  cx.moveTo(x,y-56*sc); cx.lineTo(x+18*sc,y-22*sc); cx.lineTo(x+8*sc,y-22*sc);
+  cx.lineTo(x+22*sc,y+2*sc); cx.lineTo(x+6*sc,y+2*sc); cx.lineTo(x+16*sc,y+22*sc);
+  cx.lineTo(x-16*sc,y+22*sc); cx.lineTo(x-6*sc,y+2*sc); cx.lineTo(x-22*sc,y+2*sc);
+  cx.lineTo(x-8*sc,y-22*sc); cx.lineTo(x-18*sc,y-22*sc); cx.closePath(); cx.fill();
+  cx.fillStyle='rgba(236,246,252,.85)';
+  cx.beginPath(); cx.moveTo(x,y-56*sc); cx.lineTo(x+7*sc,y-42*sc); cx.lineTo(x-7*sc,y-42*sc); cx.closePath(); cx.fill();
+  cx.fillStyle='#2a1c14'; cx.fillRect(x-2*sc,y+20*sc,4*sc,10*sc);
+  cx.restore();
+}
+function flakes(cx,n,seed){
+  cx.fillStyle='rgba(255,255,255,.5)';
+  for(let i=0;i<n;i++){
+    cx.beginPath();
+    cx.arc((seed*37+i*53)%PW, ((seed*19+i*97)%(PLAY_Y*0.8))+40, 1+(i%3), 0, Math.PI*2);
+    cx.fill();
+  }
+}
+function uphillY(x, base, amp){
+  return base - (x/PW)*amp + Math.sin(x*0.016+0.4)*7 + Math.sin(x*0.038)*3.5;
+}
+/** Snow fill under the slope. Optional world x-range for camera views. */
+function drawUphillSnow(cx, base, amp, theme, xRange){
+  theme=theme||{};
+  const x0 = (xRange&&xRange[0]!=null) ? xRange[0] : -80;
+  const x1 = (xRange&&xRange[1]!=null) ? xRange[1] : PW+80;
+  const yBot = base + Math.max(PH, amp) + 120;
+  cx.beginPath();
+  cx.moveTo(x0, yBot);
+  cx.lineTo(x0, uphillY(x0, base, amp));
+  for(let x=x0;x<=x1;x+=5) cx.lineTo(x, uphillY(x, base, amp));
+  cx.lineTo(x1, yBot);
+  cx.closePath();
+  // Snow mass under the climb — stays white/soft blue-white (never a dark slab)
+  cx.fillStyle=grad(cx,0,base-amp,0,yBot,[
+    [0, theme.snow||C.snow],
+    [0.22, theme.shade||C.shade],
+    [0.55, '#d4e4ef'],
+    [0.82, '#c2d6e4'],
+    [1, '#b4cad8']
+  ]);
+  cx.fill();
+  // 2–3 faint groomer curves following the slope (not straight horizontals)
+  cx.strokeStyle='rgba(140,168,186,.22)'; cx.lineWidth=1.2; cx.lineCap='round';
+  for(let i=0;i<3;i++){
+    cx.beginPath();
+    let started=false;
+    for(let x=x0;x<=x1;x+=6){
+      const y=uphillY(x,base,amp)+14+i*22+Math.sin(x*0.028+i)*1.8;
+      if(y>=yBot-12) break;
+      if(!started){ cx.moveTo(x,y); started=true; } else cx.lineTo(x,y);
+    }
+    if(started) cx.stroke();
+  }
+}
+
+/**
+ * Electric sled + rider. On-screen size = atlas native × ART_SCALE.
+ * Pitch to terrain/body angle; CAM_ROT stays 0 (only the vehicle rotates).
+ */
+function drawSled(cx, x, y, ang, opts){
+  opts=opts||{};
+  const poseName = (opts.pose==='stand' || opts.pose==='air') ? 'air' : 'ride';
+  const sink = opts.noShadow ? 0 : (opts.sink!=null ? opts.sink : HUMAN_PX*0.025);
+  const gy = y + sink;
+  if(!opts.noShadow){
+    const sw = hitSize('sled').w;
+    contactShadow(cx, x, y, sw*0.48, Math.max(4, HUMAN_PX*0.055));
+  }
+  if(ART.mode==='atlas' && ART.world && ART.rider && !FORCE_FAIL_ART){
+    const sf=ART.world.frames.sled, rf=ART.rider.frames[poseName]||ART.rider.frames.ride;
+    const sw=(sf.w/2)*ART_SCALE, sh=(sf.h/2)*ART_SCALE;
+    const rw=(rf.w/2)*ART_SCALE, rh=(rf.h/2)*ART_SCALE;
+    cx.save();
+    cx.translate(x, gy);
+    cx.rotate(ang||0);
+    // Face right with negative width — preserves terrain pitch sign (no scale(-1)).
+    cx.drawImage(ART.world.img, sf.x, sf.y, sf.w, sf.h, sw/2, -sh, -sw, sh);
+    const seatY = -sh * 0.42;
+    cx.drawImage(ART.rider.img, rf.x, rf.y, rf.w, rf.h, rw/2 - sw*0.02, seatY - rh*0.72, -rw, rh);
+    cx.restore();
+    return;
+  }
+  // --- vector fallback ---
+  const s = opts.scale || SLED_SCALE;
+  const nose = Math.max(0, Math.min(0.18, opts.nose||0));
+  cx.save();
+  cx.translate(x, gy);
+  cx.rotate(ang||0);
+  cx.scale(s, s);
+  cx.fillStyle='#141418';
+  rr(cx, -56, -11, 74, 11, 4); cx.fill();
+  cx.fillStyle='#2a2a32'; cx.fillRect(-54, -1.5, 70, 1.5);
+  cx.fillStyle=C.sledEdge;
+  cx.beginPath();
+  cx.moveTo(-54,-11); cx.lineTo(-50,-19); cx.lineTo(14,-20); cx.lineTo(22,-11);
+  cx.lineTo(16,-7); cx.lineTo(-52,-7); cx.closePath(); cx.fill();
+  cx.fillStyle=C.sled;
+  cx.beginPath();
+  cx.moveTo(-6,-20); cx.quadraticCurveTo(10,-34, 30,-26);
+  cx.quadraticCurveTo(40,-20, 42,-12); cx.lineTo(28,-8);
+  cx.quadraticCurveTo(10,-10, -4,-10); cx.closePath(); cx.fill();
+  cx.fillStyle='#f0ecd0';
+  cx.beginPath(); cx.ellipse(38,-14,3.6,2.4,0.12,0,Math.PI*2); cx.fill();
+  cx.save(); cx.translate(24,-8); cx.rotate(-nose);
+  cx.fillStyle='#8a98a4'; cx.fillRect(-1,0,3,9); cx.fillRect(9,0,3,9);
+  cx.fillStyle=C.ski; rr(cx,-6,8,30,3.2,1.2); cx.fill();
+  cx.restore();
+  cx.fillStyle=C.rider; cx.strokeStyle=C.rider; cx.lineCap='round';
+  cx.beginPath(); cx.ellipse(-15,-32,4,6.5,0.06,0,Math.PI*2); cx.fill();
+  cx.beginPath(); cx.arc(-14.5,-41,3.4,0,Math.PI*2); cx.fill();
+  cx.lineWidth=1.8;
+  cx.beginPath(); cx.moveTo(-13,-35); cx.lineTo(14,-30); cx.stroke();
+  cx.restore();
+}
+
+/** Rolling boulder. Callers pass center=(x, ground-r). Seated on terrain; subtle XL ring. */
+function drawBoulder(cx, x, y, r, spin, xl){
+  const gy = y + (r || hitSize('boulder').h/2);
+  if(ART.mode==='atlas' && ART.world && !FORCE_FAIL_ART){
+    const f=ART.world.frames.boulder;
+    const w=(f.w/2)*ART_SCALE, h=(f.h/2)*ART_SCALE;
+    contactShadow(cx, x, gy, w*0.45, Math.max(3, HUMAN_PX*0.04));
+    const cy = gy - h/2;
+    cx.save();
+    cx.translate(x, cy);
+    cx.rotate(spin||0);
+    cx.drawImage(ART.world.img, f.x, f.y, f.w, f.h, -w/2, -h/2, w, h);
+    // XL marker removed — was overlapping BEST/animals; size reads from sprite alone.
+    cx.restore();
+    return;
+  }
+  // vector fallback
+  contactShadow(cx, x, gy, r*0.9, Math.max(3, r*0.18));
+  cx.save(); cx.translate(x,y); cx.rotate(spin||0);
+  cx.beginPath();
+  for(let i=0;i<7;i++){
+    const a=(i/7)*Math.PI*2;
+    const rr0=r*(0.82+((i*37)%10)/40);
+    const px=Math.cos(a)*rr0, py=Math.sin(a)*rr0;
+    if(i===0) cx.moveTo(px,py); else cx.lineTo(px,py);
+  }
+  cx.closePath();
+  cx.fillStyle=xl?'#5a5048':'#6a5e52'; cx.fill();
+  cx.strokeStyle='#2a2420'; cx.lineWidth=1.2; cx.stroke();
+  cx.restore();
+}
+
+/** Climb rail — rotated to local slope/segment; feet on snow. */
+function drawRail(cx, x0, y0, x1, y1){
+  const mx=(x0+x1)/2, my=(y0+y1)/2;
+  const ang=Math.atan2(y1-y0, x1-x0);
+  const rh=hitSize('rail').h;
+  // Legs hang below bar; seat bar on the segment line.
+  if(blitAtlas(cx, ART.world, 'rail', mx, my + rh*0.82, {ang})){
+    cx.strokeStyle='rgba(255,255,255,.3)'; cx.lineWidth=1.2;
+    cx.beginPath(); cx.moveTo(x0,y0-2); cx.lineTo(x1,y1-2); cx.stroke();
+    return;
+  }
+  cx.strokeStyle='#4a5560'; cx.lineWidth=3;
+  cx.beginPath(); cx.moveTo(x0,y0+20); cx.lineTo(x0,y0); cx.stroke();
+  cx.beginPath(); cx.moveTo(x1,y1+20); cx.lineTo(x1,y1); cx.stroke();
+  cx.strokeStyle=C.rail; cx.lineWidth=6; cx.lineCap='round';
+  cx.beginPath(); cx.moveTo(x0,y0); cx.lineTo(x1,y1); cx.stroke();
+  cx.strokeStyle='rgba(255,255,255,.4)'; cx.lineWidth=1.5;
+  cx.beginPath(); cx.moveTo(x0,y0-2.5); cx.lineTo(x1,y1-2.5); cx.stroke();
+}
+
+/** Uphill kicker — bottom seated on terrain, rotated to local slope. */
+function drawKicker(cx, lipX, base, amp){
+  const kw=hitSize('kicker').w;
+  // Contact under sprite center; lip near lipX. Sample slope at center.
+  const cx0 = lipX - kw*0.12;
+  const {y:gY, ang}=slopeAt(cx0, base, amp);
+  // Seat snow base into the slope; rotate with terrain.
+  if(blitAtlas(cx, ART.world, 'kicker', cx0, gY + HUMAN_PX*0.045, {ang})) return;
+  // vector fallback
+  const lip=slopeAt(lipX, base, amp);
+  const gYv=lip.y, a=amp||KICKER_AMP;
+  cx.save();
+  cx.translate(lipX, gYv);
+  cx.rotate(lip.ang);
+  cx.fillStyle=C.shade;
+  cx.beginPath();
+  cx.moveTo(-80, 8);
+  cx.quadraticCurveTo(-44, -a*0.1, -22, -a*0.28);
+  cx.quadraticCurveTo(-6, -a*0.78, 0, -a);
+  cx.lineTo(10, -a+4);
+  cx.quadraticCurveTo(55, -a*0.32, 105, 6);
+  cx.lineTo(-80, 16); cx.closePath(); cx.fill();
+  cx.fillStyle=C.snow;
+  cx.beginPath();
+  cx.moveTo(-70, 0);
+  cx.quadraticCurveTo(-38, -a*0.12, -18, -a*0.3);
+  cx.quadraticCurveTo(-4, -a*0.8, 2, -a);
+  cx.lineTo(8, -a+5);
+  cx.quadraticCurveTo(48, -a*0.28, 92, 2);
+  cx.closePath(); cx.fill();
+  cx.strokeStyle=C.mint; cx.lineWidth=3; cx.lineCap='round';
+  cx.beginPath(); cx.moveTo(-2, -a+1); cx.lineTo(12, -a+6); cx.stroke();
+  cx.restore();
+}
+
+/** Animals / skiers — upright, feet on snow, soft contact shadow. */
+function drawAnimal(cx, name, x, y, opts){
+  opts=opts||{};
+  const pack=ART.world;
+  // Slight sink so soles meet the snow (transparent atlas padding under feet).
+  const gy = y + HUMAN_PX*0.06;
+  if(pack && ART.mode==='atlas' && !FORCE_FAIL_ART && pack.frames[name]){
+    const f=pack.frames[name];
+    const w=(f.w/2)*ART_SCALE;
+    contactShadow(cx, x, y, w*0.4, Math.max(3.2, HUMAN_PX*0.042));
+  }
+  if(blitAtlas(cx, ART.world, name, x, gy, {flipX:!!opts.flipX})) return true;
+  return false;
+}
+
+function heart(cx,x,y,s,filled){
+  cx.save(); cx.translate(x,y); cx.scale(s,s);
+  cx.beginPath();
+  cx.moveTo(0,3);
+  cx.bezierCurveTo(-4,0,-5,-4,-2.5,-5.5);
+  cx.bezierCurveTo(-1,-6.2,0,-5.2,0,-4.2);
+  cx.bezierCurveTo(0,-5.2,1,-6.2,2.5,-5.5);
+  cx.bezierCurveTo(5,-4,4,0,0,3);
+  cx.closePath();
+  if(filled){ cx.fillStyle=C.coral; cx.fill(); }
+  else { cx.strokeStyle='rgba(224,122,95,.55)'; cx.lineWidth=1.2; cx.stroke(); }
+  cx.restore();
+}
+function drawLives(cx,n,xRight,y){
+  for(let i=0;i<5;i++) heart(cx, xRight-(4-i)*17, y, 1.35, i<n);
+}
+function hudChrome(cx, opts){
+  opts=opts||{};
+  cx.fillStyle='rgba(7,20,28,.55)';
+  cx.fillRect(0,0,PW,78);
+  cx.fillStyle=C.white;
+  cx.font='700 16px Sora,sans-serif';
+  cx.textAlign='left';
+  cx.fillText(opts.title||'CORDUROY CLIMB', PAD, 30);
+  cx.fillStyle=C.ice;
+  cx.font='600 13px Sora,sans-serif';
+  cx.fillText(opts.sub||'↑ 184 m', PAD, 52);
+  drawLives(cx, opts.lives??4, PW-PAD-4, 24);
+  const bx=PW-140, by=44, bw=120, bh=12;
+  cx.fillStyle='rgba(255,255,255,.15)'; rr(cx,bx,by,bw,bh,4); cx.fill();
+  cx.fillStyle=C.charge; rr(cx,bx,by,bw*(opts.charge??0.62),bh,4); cx.fill();
+  cx.fillStyle=C.ice; cx.font='600 10px Sora,sans-serif';
+  cx.textAlign='left'; cx.fillText('CHARGE', bx, by-4);
+}
+function thumbControls(cx, highlight, opts){
+  opts=opts||{};
+  // Portrait: opaque strip. Landscape: solid buttons float over continuing snow (no dead band).
+  if(opts.overSnow!==true){
+    cx.fillStyle='#0a1820';
+    cx.fillRect(0, CTRL_TOP, PW, PH-CTRL_TOP);
+  }
+  const bw=Math.min(170, (PW-56)/2), bh=Math.min(88, PH-CTRL_TOP-16);
+  const y=CTRL_TOP+Math.max(8, (PH-CTRL_TOP-bh)/2);
+  const gap=(PW-bw*2)/3;
+  cx.fillStyle='#1a2e3a';
+  rr(cx, gap, y, bw, bh, 16); cx.fill();
+  rr(cx, PW-gap-bw, y, bw, bh, 16); cx.fill();
+  cx.strokeStyle=highlight==='nose'?C.amber:'rgba(255,255,255,.28)';
+  cx.lineWidth=highlight==='nose'?2.5:1.5;
+  rr(cx, gap, y, bw, bh, 16); cx.stroke();
+  cx.strokeStyle=highlight==='throttle'?C.mint:'rgba(255,255,255,.28)';
+  cx.lineWidth=highlight==='throttle'?2.5:1.5;
+  rr(cx, PW-gap-bw, y, bw, bh, 16); cx.stroke();
+  cx.fillStyle=C.white; cx.font='800 15px Syne,sans-serif'; cx.textAlign='center';
+  cx.fillText('NOSE-LIFT', gap+bw/2, y+bh*0.42);
+  cx.fillText('THROTTLE', PW-gap-bw/2, y+bh*0.42);
+  cx.fillStyle=C.ice; cx.font='600 11px Sora,sans-serif';
+  cx.fillText('hold · lean back', gap+bw/2, y+bh*0.68);
+  cx.fillText('hold · drive up', PW-gap-bw/2, y+bh*0.68);
+}
+function calloutBand(cx, y, h, lines){
+  const bandH=h||(lines.length>1?52:34);
+  cx.fillStyle='rgba(8,22,32,.78)';
+  rr(cx, PAD+6, y, PW-(PAD+6)*2, bandH, 12); cx.fill();
+  cx.textAlign='center';
+  let yy=y+(lines.length>1?20:23);
+  for(const L of lines){
+    cx.fillStyle=L.color||C.white;
+    drawFitText(cx, L.text, PW/2, yy, PW-56, L.weight||'700', L.size||13, L.family||'Sora,sans-serif');
+    yy+=L.gap||20;
+  }
+}
+function phoneBezel(cx){
+  const v=cx.createRadialGradient(PW/2,PH/2,220,PW/2,PH/2,620);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,.16)');
+  cx.fillStyle=v; cx.fillRect(0,0,PW,PH);
+}
+
+/* ========== SCREENS ========== */
+
+function paintTitle(cx){
+  drawWorldBg(cx, 120, 'title', {sky0:'#061018',sky1:'#0e2a3a',sky2:'#2a5a70',sky3:'#a8c8d8'});
+  pine(cx, PW-70, PLAY_Y-HUMAN_PX*0.2, PINE_S*2.0); // one near-run detail pine
+  const base=PLAY_Y+6, amp=PH*0.18;
+  drawUphillSnow(cx, base, amp, {});
+
+  cx.fillStyle=C.white; cx.textAlign='center';
+  const brandSize=drawFitText(cx,'BACKCOUNTRY',PW/2,88,PW-40,'800',36,'Syne,Sora,sans-serif');
+  cx.font=`800 ${brandSize+4}px Syne,Sora,sans-serif`;
+  cx.fillText('CLIMB', PW/2, 88+brandSize+8);
+  cx.fillStyle=C.mint; cx.font='700 12px Sora,sans-serif';
+  cx.fillText('ELECTRIC  ·  UPHILL  ·  STEADY CAM', PW/2, 88+brandSize+28);
+
+  calloutBand(cx, 88+brandSize+40, 36, [
+    {text:'Drive up. Boulders roll down.', size:12, color:C.ice, weight:'600'}
+  ]);
+
+  const px=PW*0.38; const g=slopeAt(px, base, amp);
+  drawSled(cx, px, g.y, g.ang, {nose:0.06, pose:'seat'});
+
+  // CTAs above controls
+  cx.fillStyle=C.mint;
+  rr(cx, 48, CTRL_TOP-120, PW-96, 50, 14); cx.fill();
+  cx.fillStyle=C.ink; cx.font='800 17px Syne,sans-serif'; cx.textAlign='center';
+  cx.fillText('ENTER GARAGE', PW/2, CTRL_TOP-88);
+  // solid secondary buttons (opaque — no tree show-through)
+  cx.fillStyle='#1a2e3a';
+  rr(cx, 48, CTRL_TOP-58, (PW-108)/2, 40, 12); cx.fill();
+  rr(cx, 54+(PW-108)/2, CTRL_TOP-58, (PW-108)/2, 40, 12); cx.fill();
+  cx.fillStyle=C.white; cx.font='700 13px Sora,sans-serif';
+  cx.fillText('CLIMBS', 48+(PW-108)/4, CTRL_TOP-32);
+  cx.fillText('HOWTO', 54+(PW-108)*0.75, CTRL_TOP-32);
+
+  // title has no thumb controls — opaque bottom strip
+  cx.fillStyle='#0a1820';
+  cx.fillRect(0, CTRL_TOP, PW, PH-CTRL_TOP);
+  cx.fillStyle=C.ice; cx.font='600 12px Sora,sans-serif';
+  cx.fillText('5 lives  ·  charge cells  ·  concept mock', PW/2, CTRL_TOP+40);
+  phoneBezel(cx);
+}
+
+function paintRun(cx){
+  drawWorldBg(cx, 840, 'run', {sky0:'#081820',sky1:'#154056',sky2:'#4a7a90',sky3:'#d0e4ee'});
+  flakes(cx, 20, 11);
+  // Frame climb a bit lower so slope + backdrop fill more of the screen (still mid-band)
+  const base=Math.round(PH*0.60), amp=PH*0.18;
+  const HUD_BOTTOM = 82;
+
+  // World → camera: sled ~58% H — less empty under-slope, more mountain above
+  const sledWX = PW*0.32;
+  const sledG0 = slopeAt(sledWX, base, amp);
+  const cam = camFollow(sledWX, sledG0.y, {
+    lookAhead: PW*0.14,
+    focusScreenX: PW*0.48,
+    sledScreenY: PH*0.58
+  });
+  // Keep run line below HUD
+  if(sledG0.y - cam.y < HUD_BOTTOM + HUMAN_PX*0.35){
+    cam.y = sledG0.y - (HUD_BOTTOM + HUMAN_PX*0.35);
+  }
+
+  withCam(cx, cam, ()=>{
+    const x0=cam.x-60, x1=cam.x+PW+60;
+    // one full-detail atlas pine near the run
+    pine(cx, sledWX+200, slopeAt(sledWX+200,base,amp).y, PINE_S*2.1);
+    drawUphillSnow(cx, base, amp, {}, [x0, x1]);
+
+    const cpx=sledWX-90, cpy=slopeAt(cpx,base,amp).y;
+    cx.fillStyle='#3a3228'; cx.fillRect(cpx, cpy-HUMAN_PX*0.85, 4, HUMAN_PX*0.85);
+    cx.fillStyle='#5a5048'; cx.fillRect(cpx-7, cpy-HUMAN_PX*0.9, 18, 7);
+    cx.fillStyle=C.mint; cx.beginPath(); cx.arc(cpx+2, cpy-HUMAN_PX*0.95, 3.5, 0, Math.PI*2); cx.fill();
+
+    // Boulders ahead — spaced along climb
+    const bxS=sledWX+90, bxM=sledWX+55, bxXL=sledWX+150;
+    drawBoulder(cx, bxS, slopeAt(bxS,base,amp).y-BOULDER_R.S, BOULDER_R.S, 0.7, false);
+    drawBoulder(cx, bxM, slopeAt(bxM,base,amp).y-BOULDER_R.M, BOULDER_R.M, 1.2, false);
+    drawBoulder(cx, bxXL, slopeAt(bxXL,base,amp).y-BOULDER_R.XL, BOULDER_R.XL, 0.3, true);
+
+    // Animals well spaced (gap ≫ half-widths; coyote then bear uphill)
+    drawAnimal(cx, 'coyote', sledWX+195, slopeAt(sledWX+195,base,amp).y, {});
+    drawAnimal(cx, 'bear', sledWX+290, slopeAt(sledWX+290,base,amp).y, {});
+
+    const g=slopeAt(sledWX,base,amp);
+    drawSled(cx, sledWX, g.y, g.ang, {nose:0.04, pose:'seat'});
+    cx.fillStyle='rgba(255,255,255,.45)';
+    for(let i=0;i<8;i++){ cx.beginPath(); cx.arc(sledWX-SLED_LEN_PX*0.35-i*5, g.y+2+i*1.2, 1.6, 0, Math.PI*2); cx.fill(); }
+
+    // Foreground snow continues to control band (no dark slab)
+    drawForegroundSlope(cx, base, amp, CTRL_TOP + cam.y);
+  });
+
+  // Screen-space soft snow veil if any gap remains above controls (never dark)
+  {
+    const y0 = Math.min(CTRL_TOP-8, PH*0.62);
+    if(CTRL_TOP - y0 > 12){
+      cx.fillStyle=grad(cx,0,y0,0,CTRL_TOP,[
+        [0,'rgba(238,246,251,0)'],[0.4,'rgba(220,234,242,.35)'],[1,'rgba(198,218,230,.55)']
+      ]);
+      cx.fillRect(0, y0, PW, CTRL_TOP-y0);
+      cx.strokeStyle='rgba(150,176,194,.22)'; cx.lineWidth=1.2;
+      for(let t=0;t<2;t++){
+        cx.beginPath();
+        for(let x=0;x<=PW;x+=8){
+          const y=y0+18+t*16+Math.sin(x*0.035+t)*2.5 - x*(amp/(PW*PH))*8;
+          if(x===0) cx.moveTo(x,y); else cx.lineTo(x,y);
+        }
+        cx.stroke();
+      }
+    }
+  }
+
+  cx.fillStyle='rgba(8,22,32,.75)';
+  rr(cx, PW/2-78, 88, 156, 28, 8); cx.fill();
+  cx.fillStyle=C.warn; cx.font='800 13px Syne,sans-serif'; cx.textAlign='center';
+  cx.fillText('▼ INCOMING', PW/2, 108);
+
+  hudChrome(cx,{title:'CORDUROY CLIMB', sub:'↑ 184 m  ·  BEST 212 m', charge:0.58});
+  thumbControls(cx,'throttle');
+  phoneBezel(cx);
+}
+
+function paintRail(cx){
+  drawWorldBg(cx, 420, 'rail', {sky0:'#0a1824',sky1:'#163848',sky2:'#3a6878',sky3:'#c8dce6'});
+  flakes(cx, 11, 3);
+  const base=PLAY_Y+4, amp=PH*0.19;
+  {
+    const pineMaxY=CTRL_TOP-6;
+    const b=slopeAt(PW-60,base,amp).y;
+    if(b<=pineMaxY) pine(cx, PW-60, b, PINE_S*2.1);
+  }
+  drawUphillSnow(cx, base, amp, {});
+
+  // rail on slope surface (segment = bar height above snow)
+  const rx0=PW*0.48, rx1=PW*0.92;
+  const lift=HUMAN_PX*0.28;
+  const ry0=slopeAt(rx0,base,amp).y-lift;
+  const ry1=slopeAt(rx1,base,amp).y-lift;
+  drawRail(cx, rx0, ry0, rx1, ry1);
+
+  const lblX=PW*0.66, lblY=(ry0+ry1)/2 - HUMAN_PX*0.5;
+  cx.fillStyle='rgba(8,22,32,.72)';
+  rr(cx, lblX, lblY, 104, 22, 6); cx.fill();
+  cx.fillStyle=C.ice; cx.font='700 12px Sora,sans-serif'; cx.textAlign='left';
+  const railLbl='CLIMB RAIL';
+  cx.fillText(railLbl, clampLabelX(cx, railLbl, lblX+10, 'left'), lblY+16);
+
+  // airborne hop — pitch toward rail
+  const px=PW*0.28, py=ry0-HUMAN_PX*0.08;
+  const hopAng=Math.atan2(ry0-py, rx0-px)*0.55;
+  drawSled(cx, px, py, hopAng, {nose:0.14, pose:'stand', noShadow:true});
+  contactShadow(cx, px, slopeAt(px,base,amp).y, hitSize('sled').w*0.28, HUMAN_PX*0.03);
+
+  cx.strokeStyle='rgba(240,180,41,.55)'; cx.lineWidth=2;
+  cx.beginPath();
+  cx.moveTo(px-SLED_LEN_PX*0.2, slopeAt(px-SLED_LEN_PX*0.2,base,amp).y);
+  cx.quadraticCurveTo(px, py+HUMAN_PX*0.28, rx0+12, ry0);
+  cx.stroke();
+
+  // no low pines — would clip into controls
+  drawForegroundSlope(cx, base, amp, CTRL_TOP);
+
+  hudChrome(cx,{title:'RAIL RIDGE', sub:'↑ 96 m  ·  nose-lift hop', charge:0.71});
+  thumbControls(cx,'nose');
+  calloutBand(cx, 88, 52, [
+    {text:'NOSE-LIFT  →  HOP ON', size:14, color:C.amber, weight:'800', family:'Syne,sans-serif'},
+    {text:'Front ski up · no ramp required', size:12, color:C.ice, weight:'600', gap:20}
+  ]);
+  phoneBezel(cx);
+}
+
+function paintKicker(cx){
+  drawWorldBg(cx, 980, 'kicker', {sky0:'#07141c',sky1:'#123040',sky2:'#2f5a6e',sky3:'#b8d0de'});
+  flakes(cx, 15, 7);
+  const base=PLAY_Y+4, amp=PH*0.19;
+  const lipX=PW*0.28;
+  // One near-run detail pine (feet above controls); far strip is the tile
+  const pineMaxY = CTRL_TOP - 6;
+  const p2=slopeAt(PW*0.55,base,amp).y;
+  if(p2<=pineMaxY) pine(cx, PW*0.55, p2, PINE_S*2.0);
+  drawUphillSnow(cx, base, amp, {});
+
+  // ground prop: kicker seated + rotated to slope
+  drawKicker(cx, lipX, base, amp);
+  const lip=slopeAt(lipX, base, amp);
+  const lipH = hitSize('kicker').h;
+
+  // run-line actors above pines
+  const bouldX=PW*0.66;
+  const bG=slopeAt(bouldX,base,amp);
+  drawBoulder(cx, bouldX, bG.y-BOULDER_R.L, BOULDER_R.L, 1.1, false);
+  drawAnimal(cx, 'moose', PW*0.9, slopeAt(PW*0.9,base,amp).y, {});
+
+  const brVis = hitSize('boulder').w*0.4;
+  cx.strokeStyle='rgba(240,180,41,.45)'; cx.lineWidth=1.5; cx.setLineDash([3,4]);
+  cx.beginPath(); cx.moveTo(bouldX+brVis*0.7, bG.y-hitSize('boulder').h*0.55); cx.lineTo(bouldX+brVis*1.5, bG.y-hitSize('boulder').h*0.9); cx.stroke();
+  cx.setLineDash([]);
+
+  const peakX=PW*0.42, peakY=lip.y-lipH*1.55;
+  cx.strokeStyle='rgba(94,196,168,.4)'; cx.setLineDash([6,5]); cx.lineWidth=2.5;
+  cx.beginPath();
+  cx.moveTo(lipX+6, lip.y-lipH*0.9);
+  cx.quadraticCurveTo(peakX, peakY, PW*0.82, slopeAt(PW*0.82,base,amp).y-18);
+  cx.stroke();
+  cx.setLineDash([]);
+
+  const sx=PW*0.34, sy=peakY+HUMAN_PX*0.55;
+  const land=slopeAt(PW*0.82,base,amp);
+  const airAng=Math.atan2(land.y-sy, PW*0.82-sx)*0.85;
+  drawSled(cx, sx, sy, airAng, {nose:0.08, pose:'stand', noShadow:true});
+  contactShadow(cx, sx, slopeAt(sx,base,amp).y, hitSize('sled').w*0.25, HUMAN_PX*0.028);
+
+  cx.textAlign='center';
+  cx.fillStyle=C.mint; cx.font='800 15px Syne,sans-serif';
+  cx.fillText('WHIP  +60', clampLabelX(cx,'WHIP  +60', PW*0.82, 'center'), 148);
+  cx.fillStyle=C.white; cx.font='700 12px Sora,sans-serif';
+  cx.fillText('CLEAN', clampLabelX(cx,'CLEAN', PW*0.82, 'center'), 166);
+
+  drawForegroundSlope(cx, base, amp, CTRL_TOP);
+
+  hudChrome(cx,{title:'KICKER SPINE', sub:'↑ 241 m  ·  combo ×2', charge:0.44});
+  thumbControls(cx, null);
+  calloutBand(cx, 84, 32, [
+    {text:'Uphill kicker → clear the boulder', size:13, color:C.white, weight:'700'}
+  ]);
+  phoneBezel(cx);
+}
+
+function paintUpgrade(cx){
+  cx.fillStyle=grad(cx,0,0,0,PH,[[0,'#0a1822'],[.5,'#123040'],[1,'#1c3848']]);
+  cx.fillRect(0,0,PW,PH);
+  cx.fillStyle='rgba(60,100,120,.18)';
+  cx.beginPath(); cx.ellipse(PW/2, 180, 170, 80, 0, 0, Math.PI*2); cx.fill();
+
+  cx.fillStyle=C.white; cx.font='800 28px Syne,sans-serif'; cx.textAlign='left';
+  cx.fillText('GARAGE', PAD, 52);
+  cx.fillStyle=C.mint; cx.font='700 13px Sora,sans-serif';
+  cx.fillText('CHARGE CELLS  ·  1,240', PAD, 74);
+
+  // lift — wide enough for the large sled
+  const liftY = PH * 0.48;
+  cx.fillStyle='#2a3238';
+  rr(cx, 28, liftY+32, PW-56, 18, 4); cx.fill();
+  cx.fillStyle='#3a444c';
+  cx.fillRect(PW/2-12, liftY+50, 24, 78);
+  cx.fillStyle='#4a5560';
+  rr(cx, PW/2-56, liftY+122, 112, 16, 3); cx.fill();
+  cx.fillStyle='rgba(240,180,41,.14)';
+  cx.beginPath(); cx.ellipse(PW/2, liftY-6, PW*0.4, 80, 0, 0, Math.PI*2); cx.fill();
+
+  // same world scale as run — never grow actors to show detail
+  const sx=PW/2, sy=liftY+6;
+  drawSled(cx, sx, sy, -0.04, {nose:0.06, pose:'seat'});
+
+  // hotspot cards in corners — anchors at world-scaled offsets
+  const parts=[
+    {name:'MOTOR', lv:1, col:C.amber, ax:sx+SLED_LEN_PX*0.28, ay:sy-SLED_H_PX*0.55, card:{x:PW-PAD-122, y:92}, desc:'throttle · steep'},
+    {name:'SKIS',  lv:2, col:C.coral, ax:sx+SLED_LEN_PX*0.38, ay:sy+SLED_H_PX*0.12, card:{x:PW-PAD-122, y:PH-310}, desc:'nose-lift · rail'},
+    {name:'TRACK', lv:2, col:C.mint,  ax:sx-SLED_LEN_PX*0.35, ay:sy+SLED_H_PX*0.1, card:{x:PAD, y:PH-310}, desc:'traction · powder'},
+    {name:'SUSPENSION', lv:3, col:C.ice, ax:sx-SLED_LEN_PX*0.08, ay:sy+SLED_H_PX*0.18, card:{x:PAD, y:92}, desc:'absorb · hop'}
+  ];
+  const cardW=122, cardH=58;
+  for(const p of parts){
+    // leader
+    const cx0=p.card.x, cy0=p.card.y;
+    const midX=cx0+cardW/2, midY=cy0+cardH/2;
+    cx.strokeStyle=p.col; cx.lineWidth=1.4; cx.globalAlpha=0.65;
+    cx.beginPath(); cx.moveTo(p.ax,p.ay); cx.lineTo(midX, midY); cx.stroke();
+    cx.globalAlpha=1;
+    // hotspot on sled
+    cx.strokeStyle=p.col; cx.lineWidth=2;
+    cx.beginPath(); cx.arc(p.ax,p.ay,8,0,Math.PI*2); cx.stroke();
+    cx.fillStyle='rgba(8,22,32,.5)';
+    cx.beginPath(); cx.arc(p.ax,p.ay,4.5,0,Math.PI*2); cx.fill();
+    // card
+    cx.fillStyle='rgba(8,22,32,.86)';
+    rr(cx, cx0, cy0, cardW, cardH, 10); cx.fill();
+    cx.strokeStyle=p.col; cx.lineWidth=1.5;
+    rr(cx, cx0, cy0, cardW, cardH, 10); cx.stroke();
+    cx.fillStyle=C.white; cx.font='800 12px Syne,sans-serif'; cx.textAlign='left';
+    cx.fillText(p.name, cx0+10, cy0+20);
+    cx.fillStyle=C.ice; cx.font='600 10px Sora,sans-serif';
+    cx.fillText(p.desc, cx0+10, cy0+36);
+    for(let i=0;i<5;i++){
+      cx.fillStyle=i<p.lv?p.col:'rgba(255,255,255,.18)';
+      cx.fillRect(cx0+10+i*16, cy0+44, 12, 6);
+    }
+  }
+
+  cx.fillStyle=C.ice; cx.font='600 13px Sora,sans-serif'; cx.textAlign='center';
+  cx.fillText('Tap a part on the sled to upgrade', PW/2, PH-78);
+  cx.fillStyle=C.mint;
+  rr(cx, 48, PH-60, PW-96, 42, 12); cx.fill();
+  cx.fillStyle=C.ink; cx.font='800 15px Syne,sans-serif';
+  cx.fillText('BACK TO LODGE', PW/2, PH-32);
+  phoneBezel(cx);
+}
+
+function paintSummit(cx){
+  drawWorldBg(cx, 640, 'summit', {sky0:'#1c2838',sky1:'#3a5a78',sky2:'#e8a060',sky3:'#ffe2b0'});
+  flakes(cx, 10, 5);
+
+  const base=PLAY_Y+4, amp=60;
+  drawUphillSnow(cx, base, amp, {snow:'#f7f2ea'});
+
+  // finish gate left; sled far right so SUMMIT stays fully readable
+  const gx=PW*0.28;
+  cx.fillStyle='#2a2018';
+  cx.fillRect(gx-50, PLAY_Y-140, 7, 150); cx.fillRect(gx+44, PLAY_Y-140, 7, 150);
+  cx.fillStyle=C.amber;
+  cx.fillRect(gx-50, PLAY_Y-140, 101, 18);
+  cx.fillStyle=C.ink; cx.font='800 13px Syne,sans-serif'; cx.textAlign='center';
+  cx.fillText('SUMMIT', gx, PLAY_Y-126);
+  for(let i=0;i<6;i++){
+    cx.fillStyle=i%2?C.white:'#1a1a1a';
+    cx.fillRect(gx-42+i*14, PLAY_Y-122, 14, 10);
+  }
+
+  // sled clear of gate (nose stays inside right margin)
+  const sx=PW*0.72, sg=slopeAt(sx, base, amp);
+  drawSled(cx, sx, sg.y, sg.ang, {nose:0.04, pose:'seat'});
+
+  // payoff card
+  const cardX=PAD+12, cardW=PW-(PAD+12)*2;
+  cx.fillStyle='rgba(8,22,32,.84)';
+  rr(cx, cardX, 86, cardW, 118, 16); cx.fill();
+  cx.fillStyle=C.amber; cx.textAlign='center';
+  drawFitText(cx,'SUMMIT CLEARED', PW/2, 122, cardW-28, '800', 24, 'Syne,Sora,sans-serif');
+  cx.fillStyle=C.white; cx.font='700 14px Sora,sans-serif';
+  cx.fillText('Height  486 m', PW/2, 150);
+  cx.fillText('Tricks  12  ·  Close calls  7', PW/2, 172);
+  cx.fillStyle=C.mint; cx.font='700 12px Sora,sans-serif';
+  drawFitText(cx,'Charge refilled · Summit Rush unlocked', PW/2, 194, cardW-28, '700', 12, 'Sora,sans-serif');
+
+  cx.fillStyle=C.mint;
+  rr(cx, 48, CTRL_TOP-110, PW-96, 48, 14); cx.fill();
+  cx.fillStyle=C.ink; cx.font='800 16px Syne,sans-serif';
+  cx.fillText('NEXT CLIMB', PW/2, CTRL_TOP-78);
+  cx.fillStyle='#1a2e3a';
+  rr(cx, 48, CTRL_TOP-50, PW-96, 40, 12); cx.fill();
+  cx.fillStyle=C.white; cx.font='700 14px Sora,sans-serif';
+  cx.fillText('GARAGE', PW/2, CTRL_TOP-24);
+
+  drawLives(cx, 5, PW-PAD-4, 52);
+  // opaque bottom strip
+  cx.fillStyle='#0a1820';
+  cx.fillRect(0, CTRL_TOP, PW, PH-CTRL_TOP);
+  phoneBezel(cx);
+}
+
+/** Landscape — steady cam translate (no rot); sled at ~50% H with look-ahead. */
+function paintLandscape(cx){
+  drawWorldBg(cx, 500, 'landscape', {sky0:'#081820',sky1:'#154056',sky2:'#4a7a90',sky3:'#d0e4ee'});
+  flakes(cx, 18, 15);
+
+  const HUD_BOTTOM = 78;
+  // World slope — moderate grade; camera frames the band mid-screen
+  const base = 520, amp = 210;
+  const sledWX = 360;
+  const sledG = slopeAt(sledWX, base, amp);
+  const cam = camFollow(sledWX, sledG.y, {
+    lookAhead: 160,
+    focusScreenX: PW*0.50,
+    sledScreenY: PH*0.50
+  });
+  // Keep sled in 45–55% band and oncoming boulders below HUD
+  let sledSY = sledG.y - cam.y;
+  if(sledSY < PH*0.45) cam.y = sledG.y - PH*0.45;
+  if(sledSY > PH*0.55) cam.y = sledG.y - PH*0.55;
+  sledSY = sledG.y - cam.y;
+  const boulderWX = sledWX + 280;
+  const bY = slopeAt(boulderWX, base, amp).y;
+  const minHazardY = HUD_BOTTOM + HUMAN_PX*0.65;
+  if(bY - cam.y < minHazardY){
+    cam.y = bY - minHazardY;
+    // re-clamp sled into band after hazard constraint
+    sledSY = sledG.y - cam.y;
+    if(sledSY > PH*0.58) cam.y = sledG.y - PH*0.52;
+  }
+
+  withCam(cx, cam, ()=>{
+    // one full-detail atlas pine near the run
+    pine(cx, sledWX+220, slopeAt(sledWX+220,base,amp).y, PINE_S*2.1);
+    drawUphillSnow(cx, base, amp, {}, [cam.x-100, cam.x+PW+100]);
+
+    drawBestFlag(cx, sledWX + 380, base, amp);
+
+    // Skiers OFF the climb line — shoulder left/behind, feet on snow (passed already)
+    // Parallel track slightly "into" the mountain via small x gap from sled path
+    drawAnimal(cx, 'patrol', sledWX - 200, slopeAt(sledWX - 200, base, amp).y, {});
+    drawAnimal(cx, 'skier', sledWX - 130, slopeAt(sledWX - 130, base, amp).y, {});
+    // soft ski-lane dashes (gameplay: watch for patrol)
+    cx.strokeStyle='rgba(185,216,232,.35)'; cx.lineWidth=1.2; cx.setLineDash([5,6]);
+    cx.beginPath();
+    const laneX0=sledWX-230, laneX1=sledWX-90;
+    cx.moveTo(laneX0, slopeAt(laneX0,base,amp).y-HUMAN_PX*0.15);
+    for(let x=laneX0;x<=laneX1;x+=10) cx.lineTo(x, slopeAt(x,base,amp).y-HUMAN_PX*0.15);
+    cx.stroke(); cx.setLineDash([]);
+
+    // Oncoming boulders on the climb line (ahead, fully below HUD after cam)
+    drawBoulder(cx, sledWX+180, slopeAt(sledWX+180,base,amp).y-BOULDER_R.M, BOULDER_R.M, 0.9, false);
+    drawBoulder(cx, sledWX+280, slopeAt(sledWX+280,base,amp).y-BOULDER_R.XL, BOULDER_R.XL, 0.4, true);
+
+    const g=slopeAt(sledWX, base, amp);
+    drawSled(cx, sledWX, g.y, g.ang, {nose:0.05, pose:'seat'});
+  });
+
+  // Soft near-camera snow veil (never a dark slab under the run)
+  cx.fillStyle=grad(cx,0,PH*0.62,0,PH,[
+    [0,'rgba(238,246,251,0)'],[0.4,'rgba(220,234,242,.28)'],[1,'rgba(198,218,230,.42)']
+  ]);
+  cx.fillRect(0, PH*0.62, PW, PH*0.38);
+  cx.strokeStyle='rgba(150,176,194,.2)'; cx.lineWidth=1.1;
+  for(let i=0;i<3;i++){
+    const y=PH*0.68+i*14;
+    cx.beginPath(); cx.moveTo(0,y); cx.lineTo(PW,y-10); cx.stroke();
+  }
+
+  hudChrome(cx,{title:'CORDUROY CLIMB', sub:'↑ 184 m  ·  BEST 212 m', charge:0.6});
+  thumbControls(cx,'throttle',{overSnow:true});
+  phoneBezel(cx);
+
+  window.__BC_SCALE = Object.assign({}, window.__BC_SCALE, {
+    camX: cam.x, camY: cam.y, sledScreenY: sledG.y - cam.y, CAM_ROT
+  });
+}
+
+const PAINT={
+  title:paintTitle, run:paintRun, rail:paintRail,
+  kicker:paintKicker, upgrade:paintUpgrade, summit:paintSummit,
+  landscape:paintLandscape
+};
+
+function makeCanvas(shot){
+  const c=document.createElement('canvas');
+  c.className='frame';
+  c.width=shot.w; c.height=shot.h;
+  c.style.width=shot.w+'px';
+  c.style.height=shot.h+'px';
+  c.dataset.shot=shot.id;
+  return c;
+}
+function paintAll(){
+  const list=solo?SHOTS.filter(s=>s.id===solo):SHOTS;
+  if(solo){ hdr.style.display='none'; root.className='solo'; }
+  root.innerHTML='';
+  for(const s of list){
+    setFrame(s.w, s.h);
+    const wrap=document.createElement('div');
+    wrap.className='phone';
+    if(!solo){
+      const h=document.createElement('h2');
+      h.textContent=s.label;
+      wrap.appendChild(h);
+    }
+    const c=makeCanvas(s);
+    wrap.appendChild(c);
+    root.appendChild(wrap);
+    PAINT[s.id](c.getContext('2d'));
+  }
+}
+Promise.all([fontReady(), initArt()]).then(()=>{
+  paintAll();
+  requestAnimationFrame(()=>requestAnimationFrame(paintAll));
+});
+</script>
+</body>
+</html>
