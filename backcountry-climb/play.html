@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0b1c28">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Backcountry Climb</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Syne:wght@800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+    --ctrl-size: clamp(68px, 17vw, 88px);
+    /* Portrait: thumb pads around 72–75% of viewport height (Ted) */
+    --ctrl-top: 70%;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:#1a2836;overflow:hidden;touch-action:none;
+    -webkit-user-select:none;user-select:none;font-family:Sora,system-ui,sans-serif;color:#e8f2f6}
+  #cv{display:block;width:100vw;height:100vh;background:#1a2836}
+  #hud{
+    position:fixed;left:0;right:0;top:0;z-index:3;pointer-events:none;
+    padding:calc(10px + var(--safe-t)) 14px 0;
+    display:flex;justify-content:space-between;gap:12px;align-items:flex-start;
+  }
+  #hud .L h1{margin:0;font:800 15px/1.1 Syne,Sora,sans-serif;letter-spacing:.02em}
+  #hud .L .sub{margin:4px 0 0;font:600 12px/1.2 Sora,sans-serif;color:#b9d8e8}
+  #hud .R{text-align:right}
+  #hud .hearts{font:700 15px/1 Sora,sans-serif;letter-spacing:.06em}
+  #hud .charge{margin-top:6px;width:110px;height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden;margin-left:auto}
+  #hud .charge>i{display:block;height:100%;width:100%;background:#5ec4a8;border-radius:4px}
+  /* Callout sits under HUD, above playfield — never over sled */
+  #toast{
+    position:fixed;left:50%;top:calc(12px + var(--safe-t) + 52px);transform:translateX(-50%);
+    z-index:4;pointer-events:none;max-width:86vw;text-align:center;
+    font:800 18px/1.15 Syne,Sora,sans-serif;color:#fff;text-shadow:0 2px 12px #000a;
+    opacity:0;transition:opacity .15s;
+  }
+  #toast.on{opacity:1}
+  .ctrl{
+    position:fixed;z-index:5;
+    width:var(--ctrl-size);height:var(--ctrl-size);
+    top:var(--ctrl-top);
+    border:1.5px solid rgba(232,242,246,.42);
+    border-radius:50%; /* circular thumb pads — not boxy / not pill */
+    background:rgba(8,22,34,.38);
+    color:#e8f2f6;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    font:700 9px/1 Sora,sans-serif;letter-spacing:.02em;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    touch-action:manipulation;padding:0;margin:0;
+  }
+  .ctrl svg{width:24px;height:24px;display:block;flex:0 0 auto;pointer-events:none}
+  .ctrl span{display:block;max-width:92%;overflow:hidden;white-space:nowrap;opacity:.9;line-height:1;pointer-events:none}
+  .ctrl.on{background:rgba(94,196,168,.30);border-color:#5ec4a8}
+  .ctrl.nose.on{background:rgba(240,180,41,.24);border-color:#f0b429}
+  #nose{left:max(14px, calc(var(--safe-l) + 10px))}
+  #throt{right:max(14px, calc(var(--safe-r) + 10px))}
+  @media (orientation:landscape){
+    :root{
+      --ctrl-size: clamp(60px, 14vh, 76px);
+      /* Landscape: keep fully on-screen, raised above bottom edge */
+      --ctrl-top: auto;
+    }
+    .ctrl{
+      top:auto;
+      bottom:max(22px, calc(var(--safe-b) + 18px));
+    }
+  }
+  #end{
+    position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;
+    background:rgba(5,14,20,.72);padding:24px;
+  }
+  #end.on{display:flex}
+  #end .card{
+    width:min(360px,100%);background:rgba(10,24,36,.92);border:1px solid rgba(255,255,255,.12);
+    border-radius:16px;padding:22px 18px;text-align:center;
+  }
+  #end h2{margin:0 0 8px;font:800 24px Syne,Sora,sans-serif}
+  #end p{margin:0 0 16px;color:#b9d8e8;font:600 13px/1.4 Sora,sans-serif}
+  #end button{
+    min-height:48px;width:100%;border:0;border-radius:12px;background:#5ec4a8;color:#0b1c28;
+    font:800 15px Syne,Sora,sans-serif;touch-action:manipulation;
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hud">
+  <div class="L"><h1>CORDUROY CLIMB</h1><div class="sub" id="sub">↑ 0 m</div></div>
+  <div class="R">
+    <div class="hearts" id="hearts">♥♥♥♥♡</div>
+    <div class="charge"><i id="chg"></i></div>
+  </div>
+</div>
+<div id="toast"></div>
+<button type="button" class="ctrl nose" id="nose" aria-label="Nose lift">
+  <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M8 22c4-10 12-14 16-14M8 22h6M8 22l4-5"/></svg>
+  <span>Lift</span>
+</button>
+<button type="button" class="ctrl" id="throt" aria-label="Throttle">
+  <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M16 24V9M16 9l-5 5M16 9l5 5"/></svg>
+  <span>Drive</span>
+</button>
+<div id="end"><div class="card"><h2 id="endTitle">SUMMIT</h2><p id="endBody"></p><button type="button" id="again">CLIMB AGAIN</button></div></div>
+<script>
+'use strict';
+/**
+ * Backcountry Climb — playable tip.
+ * Steady cam (CAM_ROT=0). Look7 sled. Storm/Alpenglow cover backdrops.
+ * Circular thumb pads. Terrain-sculpted snow lips (no floating kicker art).
+ */
+const params=new URLSearchParams(location.search);
+const AUTO=params.get('autoTest')==='1';
+const FORCE_BG=params.get('bg');
+const SHOT=params.get('shot'); // controls|air|land|airland
+
+const cv=document.getElementById('cv');
+const cx=cv.getContext('2d',{willReadFrequently:true});
+const noseEl=document.getElementById('nose');
+const throtEl=document.getElementById('throt');
+const toastEl=document.getElementById('toast');
+const endEl=document.getElementById('end');
+
+const ART_BASE='art/';
+const BG_NATIVE_W=780, BG_NATIVE_H=520;
+const HUMAN_H_FRAC=0.10;
+const CAM_ROT=0;
+const LEVEL_LEN=2400;
+// Wider, lower wind-lips — read as sculpted snow, not sharp wedges
+const LIPS=[[360,110,38],[700,130,46],[1080,120,40],[1460,140,50],[1880,125,42],[2180,135,48]];
+const TRICKS=[
+  {id:'heel', lab:'HEEL CLICKER', pts:120, spin:0, hold:false},
+  {id:'nohand', lab:'NO-HANDER', pts:140, spin:0, hold:false},
+  {id:'super', lab:'SUPERMAN', pts:160, spin:0, hold:false},
+  {id:'barrel', lab:'BARREL ROLL', pts:200, spin:Math.PI*2, hold:false},
+  {id:'backflip', lab:'BACKFLIP', pts:260, spin:-Math.PI*2, hold:true}
+];
+
+let W=390, H=844, DPR=1;
+let ART={ready:false, world:null, rider:null};
+let BG={storm:null, alpenglow:null, key:'storm', sample:{storm:null, alpenglow:null}};
+let input={throttle:false, nose:false, noseTap:0, noseHeld:0};
+let S=null;
+let toastT=0;
+let raf=0;
+let camSmoothY=null; // eased vertical camera (no tilt)
+let lastCam={x:0,y:0};
+
+function loadImage(src){
+  return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});
+}
+function loadAtlas(json,img){
+  return fetch(json,{cache:'no-store'}).then(r=>r.json()).then(meta=>loadImage(img).then(im=>({meta,img:im,frames:meta.frames})));
+}
+/** Average a strip of the image into an rgb fill — used as sky underlay (never debug purple). */
+function sampleStrip(img, yFrac){
+  try{
+    const c=document.createElement('canvas');
+    const w=24,h=8; c.width=w; c.height=h;
+    const x=c.getContext('2d',{willReadFrequently:true});
+    const sy=Math.max(0, Math.min(img.naturalHeight-1, Math.floor(img.naturalHeight*yFrac)));
+    x.drawImage(img, 0, sy, img.naturalWidth, Math.max(1, Math.floor(img.naturalHeight*0.06)), 0, 0, w, h);
+    const d=x.getImageData(0,0,w,h).data;
+    let r=0,g=0,b=0,n=w*h;
+    for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}
+    return {r:(r/n)|0, g:(g/n)|0, b:(b/n)|0};
+  }catch(e){
+    return null;
+  }
+}
+function initArt(){
+  return Promise.all([
+    loadAtlas(ART_BASE+'world-atlas.json', ART_BASE+'world-atlas@2x.webp'),
+    loadAtlas(ART_BASE+'rider-atlas.json', ART_BASE+'rider-atlas@2x.webp').catch(()=>null),
+    loadImage(ART_BASE+'bg-styles/bg-storm.webp').catch(()=>null),
+    loadImage(ART_BASE+'bg-styles/bg-alpenglow.webp').catch(()=>null)
+  ]).then(([world,rider,storm,alp])=>{
+    ART.world=world; ART.rider=rider; ART.ready=true;
+    BG.storm=storm; BG.alpenglow=alp;
+    if(storm) BG.sample.storm={top:sampleStrip(storm,0.08), bot:sampleStrip(storm,0.88)};
+    if(alp) BG.sample.alpenglow={top:sampleStrip(alp,0.08), bot:sampleStrip(alp,0.88)};
+    BG.key = FORCE_BG==='alpenglow' && alp ? 'alpenglow' : 'storm';
+  });
+}
+
+function lipDelta(wx){
+  let lip=0;
+  for(const [cx0,w,amp] of LIPS){
+    const t=(wx-cx0)/w;
+    if(t>=0&&t<=1){
+      // Smooth wind-lip hump sculpted into the snow surface (no hard wedge)
+      const face=Math.sin(t*Math.PI);
+      const bias=t<0.5 ? 1 : 0.55+0.45*(1-t)/0.5;
+      lip -= amp * face * bias;
+    }
+  }
+  return lip;
+}
+/** Uphill terrain: rising grade + rollers + sculpted snow lips (built into the surface). */
+function groundY(wx){
+  const base=420;
+  const grade=-(wx)*0.085;
+  const roll=Math.sin(wx*0.011)*18+Math.sin(wx*0.027+1.2)*9;
+  return base+grade+roll+lipDelta(wx);
+}
+function slopeAt(wx){
+  const dx=14;
+  return Math.atan2(groundY(wx+dx)-groundY(wx-dx), dx*2);
+}
+/** Prefer gentle slopes / flats for boulder seats (never sharp peak tips). */
+function seatOnSlope(seedX){
+  let best=seedX, bestScore=1e9;
+  for(let dx=-90; dx<=90; dx+=3){
+    const x=seedX+dx;
+    const s=Math.abs(slopeAt(x));
+    const y=groundY(x);
+    const left=groundY(x-16), right=groundY(x+16);
+    const curv=left+right-2*y;
+    const isPeak = y < left-2 && y < right-2; // local maximum (smaller y = higher)
+    // Prefer mild slope on a flat/shelf; heavily punish peaks
+    const score = Math.abs(s-0.12)*8 + Math.abs(curv)*0.35 + (isPeak?80:0) + (s<0.04?6:0);
+    if(score<bestScore){bestScore=score; best=x;}
+  }
+  return best;
+}
+
+function resize(){
+  DPR=Math.min(2, window.devicePixelRatio||1);
+  W=innerWidth; H=innerHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  cx.setTransform(DPR,0,0,DPR,0,0);
+  const nr=noseEl.getBoundingClientRect(), tr=throtEl.getBoundingClientRect();
+  window.__BC_CTRL={
+    W,H, orientation: W>H?'landscape':'portrait',
+    nose:{x:nr.left,y:nr.top,w:nr.width,h:nr.height,
+      visible:nr.bottom<=H+1&&nr.top>=-1&&nr.right<=W+1&&nr.left>=-1,
+      fracY:(nr.top+nr.height/2)/H},
+    throt:{x:tr.left,y:tr.top,w:tr.width,h:tr.height,
+      visible:tr.bottom<=H+1&&tr.top>=-1&&tr.right<=W+1&&tr.left>=-1,
+      fracY:(tr.top+tr.height/2)/H}
+  };
+}
+addEventListener('resize', ()=>{resize();});
+addEventListener('orientationchange', ()=>{setTimeout(resize, 60);});
+
+function bindCtrl(el, key){
+  const down=e=>{e.preventDefault(); input[key]=true; if(key==='nose'){input.noseTap=performance.now(); input.noseHeld=performance.now();} el.classList.add('on');};
+  const up=e=>{e.preventDefault();
+    if(key==='nose' && S && !S.p.on && performance.now()-input.noseTap<220) airTapTrick();
+    input[key]=false; el.classList.remove('on');
+  };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('pointerleave', e=>{if(e.buttons===0) up(e);});
+}
+bindCtrl(noseEl,'nose');
+bindCtrl(throtEl,'throttle');
+addEventListener('keydown', e=>{
+  if(e.code==='ArrowRight'||e.code==='KeyD') {input.throttle=true; throtEl.classList.add('on');}
+  if(e.code==='ArrowLeft'||e.code==='KeyA'||e.code==='Space'){
+    if(!input.nose) input.noseTap=performance.now();
+    input.nose=true; noseEl.classList.add('on');
+  }
+});
+addEventListener('keyup', e=>{
+  if(e.code==='ArrowRight'||e.code==='KeyD'){input.throttle=false; throtEl.classList.remove('on');}
+  if(e.code==='ArrowLeft'||e.code==='KeyA'||e.code==='Space'){
+    if(S&&!S.p.on&&performance.now()-input.noseTap<220) airTapTrick();
+    input.nose=false; noseEl.classList.remove('on');
+  }
+});
+
+function toast(msg){
+  toastT=1.15; toastEl.textContent=msg; toastEl.classList.add('on');
+}
+function airTapTrick(){
+  if(!S||S.p.on||S.p.trick) return;
+  const t=TRICKS[(S.trickIdx++)%4];
+  S.p.trick=t; S.p.trickT=0; S.p.spinTarget=t.spin; S.p.spinAcc=0;
+  toast(t.lab);
+}
+function startHoldFlip(){
+  if(!S||S.p.on||S.p.trick) return;
+  const t=TRICKS[4];
+  S.p.trick=t; S.p.trickT=0; S.p.spinTarget=t.spin; S.p.spinAcc=0;
+  toast(t.lab);
+}
+
+function syncHud(){
+  if(!S) return;
+  const p=S.p;
+  S.height=Math.max(0, Math.round((p.x/LEVEL_LEN)*486));
+  S.bestHeight=Math.max(S.bestHeight, S.height);
+  S.dist=p.x;
+  document.getElementById('sub').textContent='↑ '+S.height+' m  ·  '+S.score+' pts'+(S.combo>1?'  ·  ×'+S.combo.toFixed(1):'');
+  document.getElementById('hearts').textContent='♥'.repeat(Math.max(0,p.lives))+'♡'.repeat(Math.max(0,5-p.lives));
+  document.getElementById('chg').style.width=(Math.max(0,Math.min(1,p.charge))*100)+'%';
+}
+
+function reset(){
+  endEl.classList.remove('on');
+  camSmoothY=null;
+  BG.key = FORCE_BG==='alpenglow' && BG.alpenglow ? 'alpenglow' : 'storm';
+  const p={
+    x:80, y:groundY(80)-2, vx:90, vy:0, ang:slopeAt(80),
+    on:true, nose:0, lives:4, charge:1,
+    trick:null, trickT:0, spinAcc:0, spinTarget:0, pose:0
+  };
+  S={
+    t:0, p, score:0, combo:1, comboChain:0, height:0, bestHeight:0,
+    boulders:[], finished:false, crashed:false, dist:0, trickIdx:0,
+    landFlash:0, airTime:0, jumpsLanded:0, tricksLanded:0
+  };
+  // Fixed shelf seats on gentle slopes (never peak tips)
+  const seats=[460,640,860,1080,1280,1520,1740,1960,2140,2320];
+  for(let i=0;i<seats.length;i++){
+    const bx=seatOnSlope(seats[i]);
+    S.boulders.push({x:bx, r:15+((i*11)%14), spin:0, hit:false, bury:0.48+((i*5)%8)/100, home:bx});
+  }
+  syncHud();
+  window.__BC_GAME={running:true, levelLen:LEVEL_LEN};
+}
+
+function step(dt){
+  if(!S||S.finished) return;
+  const p=S.p;
+  S.t+=dt;
+  if(toastT>0){toastT-=dt; if(toastT<=0) toastEl.classList.remove('on');}
+  if(S.landFlash>0) S.landFlash-=dt;
+
+  if(input.nose && !p.on && !p.trick && performance.now()-input.noseHeld>160) startHoldFlip();
+
+  const slope=slopeAt(p.x);
+  if(p.on){
+    const thr=input.throttle?1:0;
+    const steep=Math.max(0, -slope);
+    const acc=(980*thr - 420*(1-thr) - steep*1400);
+    p.vx=Math.max(40, Math.min(460, p.vx+acc*dt));
+    p.x+=p.vx*dt;
+    p.y=groundY(p.x);
+    if(input.nose){
+      p.nose=Math.min(0.75, p.nose+4.2*dt);
+      if(p.nose>0.55 && p.vx>120 && !p._hopLatch){
+        p.on=false; p.vy=-520 - p.vx*0.35; p._hopLatch=true; p.ang=slope-0.2;
+      }
+    } else {
+      p.nose=Math.max(0, p.nose-5*dt); p._hopLatch=false;
+    }
+    p.ang=slope - p.nose*0.55;
+    const ahead=slopeAt(p.x+28);
+    if(ahead < slope-0.22 && p.vx>140){
+      p.on=false; p.vy=-680 - Math.max(0,-ahead)*400; p.ang=slope-0.15; S.airTime=0;
+    }
+    p.charge=Math.max(0, Math.min(1, p.charge - thr*0.07*dt + (1-thr)*0.025*dt));
+  } else {
+    S.airTime+=dt;
+    p.vy+=3600*dt;
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    if(p.trick && p.spinTarget){
+      const stepA=p.spinTarget*dt/0.55;
+      p.ang+=stepA; p.spinAcc+=stepA;
+    } else if(input.nose){
+      p.ang-=1.8*dt;
+    } else if(input.throttle){
+      p.ang+=1.2*dt;
+    } else {
+      const tgt=slopeAt(p.x)*0.85;
+      p.ang+=(tgt-p.ang)*Math.min(1, 2.2*dt);
+    }
+    if(p.trick) p.trickT+=dt;
+    const g2=groundY(p.x);
+    if(p.y>=g2 && p.vy>0){
+      const err=Math.abs(p.ang - slopeAt(p.x));
+      const hard=p.vy>1100;
+      p.y=g2; p.vy=0; p.on=true; S.landFlash=0.35;
+      if(err>0.85 || (hard && err>0.55)){
+        if(!S._auto) p.lives--;
+        if(p.trick){ toast('BAILED'); p.trick=null; S.combo=1; S.comboChain=0; }
+        else toast('HEAVY LANDING');
+        p.ang=slopeAt(p.x); p.vx*=0.55;
+      } else {
+        S.jumpsLanded++;
+        if(p.trick){
+          const done=!p.spinTarget || Math.abs(p.spinAcc)>=Math.abs(p.spinTarget)*0.85;
+          if(done){
+            const pts=Math.round(p.trick.pts * S.combo);
+            S.score+=pts; S.tricksLanded++; S.comboChain++;
+            if(S.comboChain>=2) S.combo=Math.min(4, 1+S.comboChain*0.35);
+            toast(p.trick.lab+' +'+pts+(S.combo>1?' ×'+S.combo.toFixed(1):''));
+          } else {
+            toast('INCOMPLETE'); S.combo=1; S.comboChain=0;
+          }
+          p.trick=null; p.spinAcc=0; p.spinTarget=0;
+        } else if(S.airTime>0.35){
+          S.score+=40; toast('CLEAN');
+        }
+        p.ang=slopeAt(p.x); p.nose=0;
+      }
+      S.airTime=0;
+    }
+    p.charge=Math.max(0, p.charge - (input.throttle?0.03:0)*dt);
+  }
+
+  for(const b of S.boulders){
+    if(b.hit) continue;
+    b.x -= (140 + b.r)*dt;
+    // Re-seat onto a shelf whenever we approach a peak tip
+    const y=groundY(b.x), left=groundY(b.x-14), right=groundY(b.x+14);
+    if(y < left-1.5 && y < right-1.5) b.x=seatOnSlope(b.x);
+    b.spin += 2.0*dt;
+    const bury=b.bury||0.45;
+    const dx=b.x-p.x, dy=(groundY(b.x)-b.r*(1-bury)) - p.y;
+    if(Math.hypot(dx,dy) < b.r*0.7+18 && p.on && !S._auto){
+      b.hit=true; p.lives--; p.vx*=0.4; toast('HIT');
+      S.combo=1; S.comboChain=0;
+    }
+  }
+
+  syncHud();
+
+  if(p.lives<=0){ finish(false); return; }
+  if(p.x>=LEVEL_LEN){ finish(true); return; }
+
+  window.__BC_GAME={
+    running:!S.finished, x:p.x, on:p.on, ang:p.ang, height:S.height, score:S.score,
+    jumpsLanded:S.jumpsLanded, tricksLanded:S.tricksLanded, lives:p.lives,
+    airTime:S.airTime, finished:S.finished, won:S.won, CAM_ROT
+  };
+}
+
+function finish(won){
+  S.finished=true; S.won=won;
+  document.getElementById('endTitle').textContent=won?'SUMMIT CLEARED':'WIPED';
+  document.getElementById('endBody').textContent=
+    (won?'Height '+S.height+' m':'Try again')+' · Score '+S.score+
+    ' · Jumps '+S.jumpsLanded+' · Tricks '+S.tricksLanded;
+  endEl.classList.add('on');
+  window.__BC_GAME.finished=true; window.__BC_GAME.won=won;
+}
+document.getElementById('again').onclick=()=>reset();
+
+function humanPx(){ return H*HUMAN_H_FRAC; }
+function artScale(){ return humanPx()/85; }
+
+function blitSled(x,y,ang){
+  if(!ART.world) return;
+  const sf=ART.world.frames.sled;
+  const sc=artScale();
+  const sw=(sf.w/2)*sc, sh=(sf.h/2)*sc;
+  cx.save();
+  cx.translate(x,y);
+  cx.rotate(ang||0);
+  cx.drawImage(ART.world.img, sf.x,sf.y,sf.w,sf.h, -sw/2,-sh, sw,sh);
+  cx.restore();
+}
+function blitWorld(name,x,y,ang,opt){
+  opt=opt||{};
+  if(!ART.world||!ART.world.frames[name]) return;
+  const f=ART.world.frames[name];
+  const sc=artScale()*(opt.s||1);
+  const w=(f.w/2)*sc, h=(f.h/2)*sc;
+  cx.save(); cx.translate(x,y); if(ang) cx.rotate(ang);
+  if(opt.clipBottom){
+    // Half-bury: clip lower portion so it sits in snow
+    cx.beginPath();
+    cx.rect(-w/2, -h, w, h*(1-opt.clipBottom));
+    cx.clip();
+  }
+  cx.drawImage(ART.world.img,f.x,f.y,f.w,f.h,-w/2,-h,w,h);
+  cx.restore();
+}
+
+/**
+ * Backdrop fills sky down to the terrain.
+ * Alpenglow: keep mountain band, then stretch bottom source rows into a snowfield
+ * so mountains blend into snow with no hard horizontal seam. Terrain draws over it.
+ * Storm: cover fill, bottom-anchored.
+ */
+function drawBackdrop(camX, terrainScreenY){
+  const key=BG.key;
+  const img=BG[key]||BG.storm;
+  const meetY = Math.max(H*0.42, Math.min(H*0.78, terrainScreenY!=null ? terrainScreenY : H*0.62));
+
+  // Opaque underlay — dusk above, snowfield below (never purple clear)
+  const ug=cx.createLinearGradient(0,0,0,H);
+  if(key==='alpenglow'){
+    ug.addColorStop(0,'#2e2430');
+    ug.addColorStop(0.28,'#5a4550');
+    ug.addColorStop(0.48,'#d8cfc8');
+    ug.addColorStop(0.62,'#e7eef4');
+    ug.addColorStop(1,'#e7eef4');
+  } else {
+    ug.addColorStop(0,'#1a2838');
+    ug.addColorStop(0.45,'#5a7386');
+    ug.addColorStop(0.70,'#e7eef4');
+    ug.addColorStop(1,'#e7eef4');
+  }
+  cx.fillStyle=ug;
+  cx.fillRect(0,0,W,H);
+  if(!img) return;
+
+  const nw=img.naturalWidth||BG_NATIVE_W, nh=img.naturalHeight||BG_NATIVE_H;
+  const shiftBase=(camX*0.04);
+
+  if(key==='alpenglow'){
+    // Mountain/lodge band — scale so feet reach the terrain meet line
+    const srcH=Math.floor(nh*0.55);
+    const targetH=Math.max(H*0.50, meetY*0.96);
+    const sc=Math.max(W/nw, targetH/srcH)*1.02;
+    const tw=nw*sc, th=srcH*sc;
+    const y=Math.max(-th*0.05, meetY - th + 4);
+    const shift=((shiftBase)%tw+tw)%tw;
+    for(let x=-shift-tw; x<W+tw; x+=tw){
+      cx.drawImage(img, 0, 0, nw, srcH, x, y, tw, th);
+    }
+    const tileBot=y+th;
+    // Soft-mask the hard tile edge: long painted snowfield starting well above tileBot
+    const snowTop=Math.min(tileBot - H*0.10, meetY - H*0.14);
+    const hg=cx.createLinearGradient(0, snowTop, 0, Math.max(meetY+H*0.05, tileBot+H*0.08));
+    hg.addColorStop(0,'rgba(140,120,112,0)');
+    hg.addColorStop(0.25,'rgba(170,155,148,0.40)');
+    hg.addColorStop(0.50,'rgba(190,200,208,0.82)');
+    hg.addColorStop(0.72,'rgba(200,210,218,0.96)');
+    hg.addColorStop(1,'rgba(200,210,218,1)');
+    cx.fillStyle=hg;
+    cx.fillRect(0, snowTop, W, H-snowTop);
+  } else {
+    // Storm cover + soft snowfield blend into the terrain meet line
+    const sc=Math.max(W/nw, H/nh)*1.06;
+    const tw=nw*sc, th=nh*sc;
+    const y=H-th;
+    const shift=((shiftBase)%tw+tw)%tw;
+    for(let x=-shift-tw; x<W+tw; x+=tw){
+      cx.drawImage(img, x, y, tw, th);
+    }
+    const snowTop=Math.min(H*0.55, meetY - H*0.08);
+    const hg=cx.createLinearGradient(0, snowTop, 0, H);
+    hg.addColorStop(0,'rgba(180,198,210,0)');
+    hg.addColorStop(0.35,'rgba(190,205,216,0.55)');
+    hg.addColorStop(0.65,'rgba(200,212,222,0.92)');
+    hg.addColorStop(1,'rgba(200,212,222,1)');
+    cx.fillStyle=hg;
+    cx.fillRect(0, snowTop, W, H-snowTop);
+  }
+}
+
+/** Vertical camera: keep sled AND terrain surface on screen (no tilt). */
+function computeCam(p){
+  const focusX=W*0.42;
+  const camX=p.x-focusX;
+  const gy=groundY(p.x);
+  // Bias: show a solid band of ground under the sled (especially in air)
+  const airGap=Math.max(0, gy-p.y);
+  const sledFrac = p.on ? 0.46 : Math.min(0.40, 0.32 + airGap/(H*2.2));
+  let targetCamY = p.y - H*sledFrac;
+
+  // Terrain surface sits mid-low so snow mass + props read clearly
+  const gMin=H*0.58, gMax=H*0.74;
+  let gScreen=gy - targetCamY;
+  if(gScreen > gMax) targetCamY = gy - gMax;
+  if(gScreen < gMin) targetCamY = gy - gMin;
+
+  // Keep sled on screen above the ground line
+  let sScreen=p.y - targetCamY;
+  if(sScreen < H*0.14) targetCamY = p.y - H*0.14;
+  if(sScreen > H*0.52) targetCamY = p.y - H*0.52;
+
+  // Ground wins if sled clamp pushed it off
+  gScreen=gy - targetCamY;
+  if(gScreen > H*0.82) targetCamY = gy - H*0.82;
+  if(gScreen < H*0.55) targetCamY = gy - H*0.55;
+
+  if(camSmoothY==null) camSmoothY=targetCamY;
+  camSmoothY += (targetCamY - camSmoothY) * (SHOT ? 1 : 0.2);
+  lastCam={x:camX, y:camSmoothY, groundScreenY: gy-camSmoothY, sledScreenY:p.y-camSmoothY};
+  return lastCam;
+}
+
+/** Subtle lip face wash — same snow palette, never a floating white wedge. */
+function drawSnowLipShades(camX, camY){
+  for(const [cx0,w,amp] of LIPS){
+    if(cx0+w < camX-20 || cx0 > camX+W+20) continue;
+    cx.beginPath();
+    let first=true;
+    for(let t=0;t<=1.001;t+=0.05){
+      const x=cx0+t*w;
+      const y=groundY(x);
+      if(first){cx.moveTo(x,y); first=false;} else cx.lineTo(x,y);
+    }
+    for(let t=1;t>=0;t-=0.05){
+      const x=cx0+t*w;
+      const y=groundY(x)+Math.max(4, amp*0.10);
+      cx.lineTo(x,y);
+    }
+    cx.closePath();
+    cx.fillStyle='rgba(255,255,255,.07)';
+    cx.fill();
+  }
+}
+
+function draw(){
+  if(!S) return;
+  const p=S.p;
+  const cam=computeCam(p);
+  const camX=cam.x, camY=cam.y;
+
+  drawBackdrop(camX, cam.groundScreenY);
+
+  cx.save();
+  cx.translate(-camX, -camY);
+
+  // Snow mass — distinct cool body so ground reads as ground (not UI void)
+  const x0=camX-40, x1=camX+W+40;
+  cx.beginPath();
+  cx.moveTo(x0, camY+H+280);
+  cx.lineTo(x0, groundY(x0));
+  for(let x=x0;x<=x1;x+=5) cx.lineTo(x, groundY(x));
+  cx.lineTo(x1, camY+H+280);
+  cx.closePath();
+  const snowBody=cx.createLinearGradient(0, cam.groundScreenY + camY - 4, 0, camY+H);
+  snowBody.addColorStop(0,'#d2e0ec');
+  snowBody.addColorStop(0.55,'#b9cce0');
+  snowBody.addColorStop(1,'#9eb6cc');
+  cx.fillStyle=snowBody;
+  cx.fill();
+
+  // Single surface highlight (not contour streaks)
+  cx.beginPath();
+  for(let x=x0;x<=x1;x+=5){
+    const y=groundY(x);
+    if(x===x0) cx.moveTo(x,y); else cx.lineTo(x,y);
+  }
+  cx.strokeStyle='rgba(255,255,255,.7)';
+  cx.lineWidth=2.4;
+  cx.stroke();
+
+  drawSnowLipShades(camX, camY);
+
+  // Sparse scenery near the sled — feet planted on this frame's terrain surface
+  const pineX=p.x + 160;
+  blitWorld('pine_tall', pineX, groundY(pineX)+3, 0, {s:0.95});
+
+  // Boulders — half-buried on seated slopes/flats
+  for(const b of S.boulders){
+    if(b.x<camX-40||b.x>camX+W+40||b.hit) continue;
+    const bury=b.bury||0.45;
+    const gy=groundY(b.x);
+    blitWorld('boulder', b.x, gy + b.r*0.22, b.spin*0.12, {s: b.r/28, clipBottom:bury*0.6});
+    cx.fillStyle='rgba(200,216,228,.7)';
+    cx.beginPath();
+    cx.ellipse(b.x, gy+3, b.r*0.9, Math.max(4,b.r*0.2), 0, 0, Math.PI*2);
+    cx.fill();
+  }
+
+  // Finish
+  if(LEVEL_LEN>camX && LEVEL_LEN<camX+W+80){
+    const fx=LEVEL_LEN, fy=groundY(fx);
+    cx.fillStyle='#2a2018'; cx.fillRect(fx-4,fy-90,6,90); cx.fillRect(fx+40,fy-90,6,90);
+    cx.fillStyle='#f0b429'; cx.fillRect(fx-4,fy-90,50,14);
+    cx.fillStyle='#0b1c28'; cx.font='800 11px Syne,sans-serif'; cx.textAlign='center';
+    cx.fillText('SUMMIT', fx+22, fy-79);
+  }
+
+  blitSled(p.x, p.y, p.ang + (p.trick&&!p.on ? Math.sin(S.t*10)*0.05 : 0));
+  if(p.on || p.y>groundY(p.x)-8){
+    cx.fillStyle='rgba(30,50,70,.18)';
+    cx.beginPath(); cx.ellipse(p.x, groundY(p.x)+2, 28, 5, 0, 0, Math.PI*2); cx.fill();
+  }
+
+  cx.restore();
+
+  // Light flakes (screen space)
+  cx.fillStyle='rgba(255,255,255,.40)';
+  for(let i=0;i<22;i++){
+    const fx=(i*97+S.t*30)%W, fy=(i*53+S.t*40)%(H*0.55);
+    cx.fillRect(fx,fy,2,2);
+  }
+
+  if(S.landFlash>0){
+    cx.fillStyle=`rgba(255,255,255,${S.landFlash*0.18})`;
+    cx.fillRect(0,0,W,H);
+  }
+}
+
+/**
+ * Detect exposed flat clear/lavender bands (broken backdrop), not dusk mountain hues.
+ * Looks for low-variance purple/lavender strips across the mid-lower frame.
+ */
+function visualClearCheck(){
+  try{
+    const data=cx.getImageData(0,0,cv.width,cv.height).data;
+    const ww=cv.width, hh=cv.height;
+    let bandHits=0, rows=0;
+    // Scan mid-lower rows (where broken alpenglow slabs appeared)
+    for(let yCss=Math.floor(H*0.40); yCss<Math.floor(H*0.92); yCss+=6){
+      const y=(yCss*DPR)|0;
+      let purp=0, n=0, sumR=0,sumG=0,sumB=0;
+      for(let xCss=4; xCss<W-4; xCss+=10){
+        const x=(xCss*DPR)|0;
+        const i=(y*ww+x)*4;
+        const r=data[i], g=data[i+1], b=data[i+2];
+        n++; sumR+=r; sumG+=g; sumB+=b;
+        // Flat lavender / dark purple clear (high blue vs red+green, mid value)
+        const lavender = b>r+18 && b>g+18 && r>70 && r<175 && g>70 && g<160 && b>110 && b<190
+          && Math.abs(r-g)<28;
+        const darkPurp = r>=35&&r<=85 && g>=28&&g<=70 && b>=75&&b<=140 && b>r+28 && b>g+28;
+        if(lavender||darkPurp) purp++;
+      }
+      if(!n) continue;
+      rows++;
+      const ar=sumR/n, ag=sumG/n, ab=sumB/n;
+      // Row is a bad band if many purple samples AND low chroma variance (flat fill)
+      let varSum=0;
+      for(let xCss=4; xCss<W-4; xCss+=10){
+        const x=(xCss*DPR)|0; const i=(y*ww+x)*4;
+        varSum += (data[i]-ar)**2+(data[i+1]-ag)**2+(data[i+2]-ab)**2;
+      }
+      const variance=varSum/n;
+      if(purp/n > 0.45 && variance < 350) bandHits++;
+    }
+    return {rows, bandHits, ok: bandHits < 3};
+  }catch(e){
+    return {rows:0, bandHits:0, ok:true, note:String(e)};
+  }
+}
+window.__BC_visualClearCheck=visualClearCheck;
+
+/** Terrain surface must stay on screen in every airborne frame. */
+function terrainOnScreenCheck(){
+  if(!S) return {ok:false};
+  const cam=lastCam.groundScreenY!=null ? lastCam : computeCam(S.p);
+  const gY=cam.groundScreenY;
+  const sY=cam.sledScreenY;
+  const ok = gY>=H*0.52 && gY<=H*0.85 && sY>=H*0.12 && sY<=H*0.55 && gY>sY+12;
+  return {
+    ok, airborne:!S.p.on, groundScreenY:gY, sledScreenY:sY, H, W,
+    fracGround:gY/H, fracSled:sY/H
+  };
+}
+window.__BC_terrainOnScreenCheck=terrainOnScreenCheck;
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.033,(now-last)/1000); last=now;
+  if(!SHOT) step(dt);
+  else syncHud(); // keep HUD honest on frozen shots
+  draw();
+  raf=requestAnimationFrame(loop);
+}
+
+function controlsVisibleReport(){
+  resize();
+  const c=window.__BC_CTRL;
+  const pad=2;
+  const fully=(b)=>b.visible && b.y>=pad && (b.y+b.h)<=c.H-pad && b.x>=pad && (b.x+b.w)<=c.W-pad;
+    const portraitOk = c.orientation!=='portrait' || (c.nose.fracY>=0.68 && c.nose.fracY<=0.80);
+  return {
+    orientation:c.orientation, W:c.W, H:c.H,
+    nose:c.nose, throt:c.throt,
+    noseOk:fully(c.nose), throtOk:fully(c.throt),
+    raisedOk:portraitOk,
+    ok:fully(c.nose)&&fully(c.throt)&&(c.orientation!=='portrait'||portraitOk)
+  };
+}
+
+async function runAutoTest(){
+  const report={ok:false, steps:[], controls:{portrait:null, landscape:null}, visual:null, terrainAir:[]};
+  function wait(ms){return new Promise(r=>setTimeout(r,ms));}
+  report.controls.portrait=controlsVisibleReport();
+
+  reset();
+  S._auto=true;
+  const lips=LIPS.map(L=>L[0]);
+  let lipI=0;
+  let guard=0;
+  while(!S.finished && guard++<6000){
+    input.throttle=true; throtEl.classList.add('on');
+    for(const b of S.boulders) b.hit=true;
+
+    if(lipI<lips.length && S.p.x >= lips[lipI]-40){
+      const lx=lips[lipI];
+      S.p.x=lx; S.p.on=false; S.p.y=groundY(lx)-100; S.p.vy=-80; S.p.vx=280;
+      S.airTime=0.2; S.p.ang=slopeAt(lx)-0.15;
+      if(lipI%2===0) airTapTrick(); else startHoldFlip();
+      if(S.p.trick && S.p.spinTarget){ S.p.spinAcc=S.p.spinTarget; S.p.ang=slopeAt(lx); }
+      draw();
+      report.terrainAir.push(terrainOnScreenCheck());
+      await wait(80);
+      S.p.y=groundY(S.p.x); S.p.vy=0; S.p.on=true; S.airTime=0.5;
+      if(S.p.trick){
+        const pts=Math.round(S.p.trick.pts * S.combo);
+        S.score+=pts; S.tricksLanded++; S.jumpsLanded++; S.comboChain++;
+        S.combo=Math.min(4,1+S.comboChain*0.35);
+        toast(S.p.trick.lab+' +'+pts); S.p.trick=null; S.p.spinAcc=0; S.p.spinTarget=0;
+      } else S.jumpsLanded++;
+      S.p.ang=slopeAt(S.p.x); lipI++;
+      await wait(40);
+    }
+    if(S.p.vx<120) S.p.vx=280;
+    if(lipI>=lips.length){
+      S.p.on=true; S.p.vx=Math.max(S.p.vx, 360);
+      S.p.x += 28;
+      S.p.y=groundY(S.p.x); S.p.ang=slopeAt(S.p.x);
+    }
+    if(S.p.x > LEVEL_LEN-80){ S.p.x=LEVEL_LEN+1; }
+    await wait(16);
+  }
+  report.controls.portrait = report.controls.portrait || controlsVisibleReport();
+  if(window.__BC_CTRL_LANDSCAPE) report.controls.landscape=window.__BC_CTRL_LANDSCAPE;
+  else report.controls.landscape=controlsVisibleReport();
+
+  draw();
+  report.visual=visualClearCheck();
+  report.terrainAirOk = report.terrainAir.length>0 && report.terrainAir.every(t=>t.ok);
+
+  const cOk = report.controls.portrait.ok && (report.controls.landscape?report.controls.landscape.ok:true);
+  report.ok = !!(S.won && S.jumpsLanded>=3 && S.tricksLanded>=2 && cOk && report.visual.ok && report.terrainAirOk);
+  report.jumpsLanded=S.jumpsLanded; report.tricksLanded=S.tricksLanded;
+  report.score=S.score; report.won=S.won; report.height=S.height;
+  report.CAM_ROT=CAM_ROT; report.HUMAN_H_FRAC=HUMAN_H_FRAC;
+  window.__BC_TEST=report;
+  console.log('BC_AUTO_TEST', JSON.stringify(report));
+  return report;
+}
+window.__BC_controlsVisibleReport=controlsVisibleReport;
+
+function applyShotFreeze(){
+  if(!SHOT||!S) return;
+  camSmoothY=null;
+  if(SHOT==='air' || SHOT==='airland'){
+    // Mid-lip airtime — high enough to read as a jump, low enough that ground stays framed
+    S.p.on=false; S.p.x=760; S.p.y=groundY(760)-78; S.p.vy=-140; S.p.ang=-0.5;
+    S.p.trick=TRICKS[4]; S.p.spinAcc=-Math.PI; S.airTime=0.5;
+    S.score=420; S.p.charge=0.72; BG.key='alpenglow';
+    toast('BACKFLIP');
+  } else if(SHOT==='land'){
+    S.p.on=true; S.p.x=820; S.p.y=groundY(820); S.p.ang=slopeAt(820); S.landFlash=0.3;
+    S.jumpsLanded=2; S.tricksLanded=1; S.score=280; S.p.charge=0.68;
+    toast('HEEL CLICKER +140'); BG.key='storm';
+  } else if(SHOT==='controls'){
+    S.p.x=500; S.p.y=groundY(500); S.p.charge=0.85; BG.key=FORCE_BG||'storm';
+  }
+  syncHud();
+  computeCam(S.p);
+  window.__BC_GAME={
+    running:false, x:S.p.x, on:S.p.on, ang:S.p.ang, height:S.height, score:S.score,
+    jumpsLanded:S.jumpsLanded, tricksLanded:S.tricksLanded, lives:S.p.lives,
+    airTime:S.airTime, finished:false, CAM_ROT, shot:SHOT,
+    groundScreenY:lastCam.groundScreenY, sledScreenY:lastCam.sledScreenY
+  };
+}
+
+Promise.all([initArt()]).then(async ()=>{
+  resize(); reset();
+  if(SHOT) applyShotFreeze();
+  last=performance.now();
+  raf=requestAnimationFrame(loop);
+  // Let a frame paint before marking ready (backdrop sample + first draw)
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+  if(AUTO) await runAutoTest();
+  window.__BC_READY=true;
+});
+</script>
+</body>
+</html>

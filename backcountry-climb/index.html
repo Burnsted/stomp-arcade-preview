@@ -38,18 +38,23 @@
 <body>
 <header id="hdr">
   <h1>Backcountry Climb</h1>
-  <p>Concept mocks only — uphill electric snowmobile. Steady locked side-scroll (no camera tilt — see CONCEPT.md). Combines Terrain Park climb features with Boulder Dodge descending hazards.</p>
-  <p class="note">Franz 3D art set v1 (atlas) — ride pose = 0.10 × playfield height (global ART_SCALE). Vector fallback if art fails. Pattern feel: Hill Climb Racing + Geometry Dash fairness. No copied IP.</p>
+  <p>Concept art gallery — playable tip is <a href="play.html" style="color:var(--mint)">play.html</a>. Steady locked side-scroll (no camera tilt — see CONCEPT.md).</p>
+  <p class="note">Franz 3D art · Look7 sled · bg-styles Storm/Alpenglow. Ride pose = 0.10 × playfield height. Open without <code>?gallery=1</code> to play.</p>
 </header>
 <div id="root" class="gallery"></div>
-<div class="tag">MOCK · concept · no playable build · &lt;350KB tip target</div>
+<div class="tag">MOCK gallery · playable → play.html · &lt;350KB tip target</div>
 <script>
 'use strict';
 /**
  * Backcountry Climb — canvas phone mocks
  * Native frame: 390×844 portrait · 844×390 landscape
  * World scale locked to HUMAN_H_FRAC (see constants) — sled/rider/pines/boulders/kickers.
+ * Default entry (no ?shot / ?gallery) redirects to the playable tip.
  */
+const _params=new URLSearchParams(location.search);
+if(!_params.get('shot') && _params.get('gallery')!=='1'){
+  location.replace('play.html'+location.search+location.hash);
+}
 
 const SHOTS = [
   {id:'title',      label:'01 · Title', w:390, h:844},
@@ -95,14 +100,16 @@ const KICKER_H_X_HUMAN = 1.15;      // lip height ~2 m
 const ANIMAL_H_X_HUMAN = { coyote:0.45, bear:0.85, moose:1.35 };
 const CAM_ROT = 0;                  // ALWAYS 0
 
-let PW=390, PH=844, PAD=16, PLAY_Y=523, CTRL_TOP=716;
+let PW=390, PH=844, PAD=16, PLAY_Y=523, CTRL_TOP=640;
 let HUMAN_PX=84, ART_SCALE=1, SLED_SCALE=1.19, SLED_LEN_PX=126, SLED_H_PX=56;
 let PINE_S=1, BOULDER_R={S:15,M:24,L:30,XL:40}, KICKER_AMP=97;
 
 function setFrame(w,h){
   PW=w; PH=h; PAD=Math.round(Math.min(w,h)*0.042);
   PLAY_Y=Math.round(h*0.62);
-  CTRL_TOP = w>h ? (h-76) : (h-128);
+  // Raised thumb band (Ted): well above bottom / home-indicator zone
+  // Portrait 390×844 → strip starts ~200px from bottom; landscape keeps both pads on-screen
+  CTRL_TOP = w>h ? Math.max(48, h - 118) : Math.max(120, h - 200);
   // One global sprite factor from playfield height — portrait and landscape.
   HUMAN_PX = PH * HUMAN_H_FRAC;
   ART_SCALE = HUMAN_PX / RIDER_ATLAS_H; // ~1 @844, ~0.46 @390
@@ -141,7 +148,7 @@ const hdr=document.getElementById('hdr');
 /**
  * Franz 3D art atlases (2× DPR). Native CSS = atlas_px÷2; on-screen = native × ART_SCALE.
  * One global ART_SCALE from playfield height (ride = 0.10×PH). Bottom-aligned.
- * Sled atlas faces left → flipX for climb-right.
+ * Sled atlas Look7 = sled+adult driver facing right (uphill); no mirror.
  */
 const ART_BASE = 'art/';
 const ART = {
@@ -657,33 +664,26 @@ function drawUphillSnow(cx, base, amp, theme, xRange){
 }
 
 /**
- * Electric sled + rider. On-screen size = atlas native × ART_SCALE.
- * Atlas sled/rider face left — mirror with scale(-1,1) so both face uphill (climb-right).
+ * Electric sled + driver. On-screen size = atlas native × ART_SCALE.
+ * Look7 'sled' frame is sled+adult in one sprite, facing right (uphill) — no mirror.
  * Pitch to terrain/body angle; CAM_ROT stays 0 (only the vehicle rotates).
  */
 function drawSled(cx, x, y, ang, opts){
   opts=opts||{};
-  const poseName = (opts.pose==='stand' || opts.pose==='air') ? 'air' : 'ride';
   const sink = opts.noShadow ? 0 : (opts.sink!=null ? opts.sink : HUMAN_PX*0.025);
   const gy = y + sink;
-  // Default climb-right; opts.faceRight===false only for rare downhill-facing beats
-  const faceRight = opts.faceRight!==false;
   if(!opts.noShadow){
     const sw = hitSize('sled').w;
     contactShadow(cx, x, y, sw*0.48, Math.max(4, HUMAN_PX*0.055));
   }
-  if(ART.mode==='atlas' && ART.world && ART.rider && !FORCE_FAIL_ART){
-    const sf=ART.world.frames.sled, rf=ART.rider.frames[poseName]||ART.rider.frames.ride;
+  if(ART.mode==='atlas' && ART.world && !FORCE_FAIL_ART){
+    const sf=ART.world.frames.sled;
     const sw=(sf.w/2)*ART_SCALE, sh=(sf.h/2)*ART_SCALE;
-    const rw=(rf.w/2)*ART_SCALE, rh=(rf.h/2)*ART_SCALE;
     cx.save();
     cx.translate(x, gy);
     cx.rotate(ang||0);
-    if(faceRight) cx.scale(-1, 1); // atlas faces left → uphill/right
-    // Positive draw sizes; mirror via CTM so sled + rider stay locked together
+    // Combined sled+driver sprite faces right natively — draw unflipped
     cx.drawImage(ART.world.img, sf.x, sf.y, sf.w, sf.h, -sw/2, -sh, sw, sh);
-    const seatY = -sh * 0.42;
-    cx.drawImage(ART.rider.img, rf.x, rf.y, rf.w, rf.h, -rw/2 - sw*0.02, seatY - rh*0.72, rw, rh);
     cx.restore();
     return;
   }
@@ -693,7 +693,6 @@ function drawSled(cx, x, y, ang, opts){
   cx.save();
   cx.translate(x, gy);
   cx.rotate(ang||0);
-  if(!faceRight) cx.scale(-1, 1);
   cx.scale(s, s);
   cx.fillStyle='#141418';
   rr(cx, -56, -11, 74, 11, 4); cx.fill();
@@ -859,28 +858,34 @@ function hudChrome(cx, opts){
 }
 function thumbControls(cx, highlight, opts){
   opts=opts||{};
-  // Portrait: opaque strip. Landscape: solid buttons float over continuing snow (no dead band).
+  // Translucent dual pads — raised for thumb reach; not pills / not a solid dock box.
+  // Landscape: float over continuing snow. Portrait: soft fade only (no opaque strip).
   if(opts.overSnow!==true){
-    cx.fillStyle='#0a1820';
-    cx.fillRect(0, CTRL_TOP, PW, PH-CTRL_TOP);
+    const fade=cx.createLinearGradient(0, CTRL_TOP-24, 0, PH);
+    fade.addColorStop(0,'rgba(8,22,34,0)');
+    fade.addColorStop(0.35,'rgba(8,22,34,.28)');
+    fade.addColorStop(1,'rgba(8,22,34,.45)');
+    cx.fillStyle=fade;
+    cx.fillRect(0, CTRL_TOP-24, PW, PH-(CTRL_TOP-24));
   }
-  const bw=Math.min(170, (PW-56)/2), bh=Math.min(88, PH-CTRL_TOP-16);
-  const y=CTRL_TOP+Math.max(8, (PH-CTRL_TOP-bh)/2);
+  const bw=Math.min(152, (PW-56)/2), bh=Math.min(78, Math.max(56, PH-CTRL_TOP-28));
+  // Sit in the upper part of the raised band (above home-indicator / bottom edge)
+  const y=CTRL_TOP+10;
   const gap=(PW-bw*2)/3;
-  cx.fillStyle='#1a2e3a';
+  cx.fillStyle='rgba(8,22,34,.42)';
   rr(cx, gap, y, bw, bh, 16); cx.fill();
   rr(cx, PW-gap-bw, y, bw, bh, 16); cx.fill();
-  cx.strokeStyle=highlight==='nose'?C.amber:'rgba(255,255,255,.28)';
+  cx.strokeStyle=highlight==='nose'?C.amber:'rgba(255,255,255,.35)';
   cx.lineWidth=highlight==='nose'?2.5:1.5;
   rr(cx, gap, y, bw, bh, 16); cx.stroke();
-  cx.strokeStyle=highlight==='throttle'?C.mint:'rgba(255,255,255,.28)';
+  cx.strokeStyle=highlight==='throttle'?C.mint:'rgba(255,255,255,.35)';
   cx.lineWidth=highlight==='throttle'?2.5:1.5;
   rr(cx, PW-gap-bw, y, bw, bh, 16); cx.stroke();
-  cx.fillStyle=C.white; cx.font='800 15px Syne,sans-serif'; cx.textAlign='center';
+  cx.fillStyle=C.white; cx.font='800 14px Syne,sans-serif'; cx.textAlign='center';
   cx.fillText('NOSE-LIFT', gap+bw/2, y+bh*0.42);
   cx.fillText('THROTTLE', PW-gap-bw/2, y+bh*0.42);
-  cx.fillStyle=C.ice; cx.font='600 11px Sora,sans-serif';
-  cx.fillText('hold · lean back', gap+bw/2, y+bh*0.68);
+  cx.fillStyle=C.ice; cx.font='600 10px Sora,sans-serif';
+  cx.fillText('hold · lean / air', gap+bw/2, y+bh*0.68);
   cx.fillText('hold · drive up', PW-gap-bw/2, y+bh*0.68);
 }
 function calloutBand(cx, y, h, lines){
