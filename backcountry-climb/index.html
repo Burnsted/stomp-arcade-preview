@@ -141,7 +141,7 @@ const hdr=document.getElementById('hdr');
 /**
  * Franz 3D art atlases (2× DPR). Native CSS = atlas_px÷2; on-screen = native × ART_SCALE.
  * One global ART_SCALE from playfield height (ride = 0.10×PH). Bottom-aligned.
- * Sled atlas faces left → flipX for climb-right.
+ * Sled atlas v2 = sled+kid facing right (uphill); no mirror.
  */
 const ART_BASE = 'art/';
 const ART = {
@@ -657,33 +657,26 @@ function drawUphillSnow(cx, base, amp, theme, xRange){
 }
 
 /**
- * Electric sled + rider. On-screen size = atlas native × ART_SCALE.
- * Atlas sled/rider face left — mirror with scale(-1,1) so both face uphill (climb-right).
+ * Electric sled + driver. On-screen size = atlas native × ART_SCALE.
+ * v2 'sled' frame is sled+kid in one sprite, facing right (uphill) — no mirror.
  * Pitch to terrain/body angle; CAM_ROT stays 0 (only the vehicle rotates).
  */
 function drawSled(cx, x, y, ang, opts){
   opts=opts||{};
-  const poseName = (opts.pose==='stand' || opts.pose==='air') ? 'air' : 'ride';
   const sink = opts.noShadow ? 0 : (opts.sink!=null ? opts.sink : HUMAN_PX*0.025);
   const gy = y + sink;
-  // Default climb-right; opts.faceRight===false only for rare downhill-facing beats
-  const faceRight = opts.faceRight!==false;
   if(!opts.noShadow){
     const sw = hitSize('sled').w;
     contactShadow(cx, x, y, sw*0.48, Math.max(4, HUMAN_PX*0.055));
   }
-  if(ART.mode==='atlas' && ART.world && ART.rider && !FORCE_FAIL_ART){
-    const sf=ART.world.frames.sled, rf=ART.rider.frames[poseName]||ART.rider.frames.ride;
+  if(ART.mode==='atlas' && ART.world && !FORCE_FAIL_ART){
+    const sf=ART.world.frames.sled;
     const sw=(sf.w/2)*ART_SCALE, sh=(sf.h/2)*ART_SCALE;
-    const rw=(rf.w/2)*ART_SCALE, rh=(rf.h/2)*ART_SCALE;
     cx.save();
     cx.translate(x, gy);
     cx.rotate(ang||0);
-    if(faceRight) cx.scale(-1, 1); // atlas faces left → uphill/right
-    // Positive draw sizes; mirror via CTM so sled + rider stay locked together
+    // Combined sled+driver sprite faces right natively — draw unflipped
     cx.drawImage(ART.world.img, sf.x, sf.y, sf.w, sf.h, -sw/2, -sh, sw, sh);
-    const seatY = -sh * 0.42;
-    cx.drawImage(ART.rider.img, rf.x, rf.y, rf.w, rf.h, -rw/2 - sw*0.02, seatY - rh*0.72, rw, rh);
     cx.restore();
     return;
   }
@@ -693,7 +686,6 @@ function drawSled(cx, x, y, ang, opts){
   cx.save();
   cx.translate(x, gy);
   cx.rotate(ang||0);
-  if(!faceRight) cx.scale(-1, 1);
   cx.scale(s, s);
   cx.fillStyle='#141418';
   rr(cx, -56, -11, 74, 11, 4); cx.fill();
