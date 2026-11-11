@@ -44,11 +44,14 @@ canvas{display:block;width:100%;height:100%}
 <script>
 (function(){
 'use strict';
-var VER='0.9.18-airspin';
+var VER='0.9.20-groms';
 var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 var W=390,H=844,scale=1,OY=0,dpr=1;
 var GROUND=268,G=3400,JV=-980,DT=1/120;
 var COYOTE=0.09,BUFFER=0.11,HOLD_CUT=0.62;
+var LIVES_MAX=5,lives=LIVES_MAX;
+/* Grom 1: sit (L1+) still; ride (L2+) moves at ~60% player speed. Native 1x, ≤70% rider H. */
+var GROM_SPD_FRAC=0.60,GROM_HIT=0.80,GROM_CLEAR_PTS=35,GROM_PAD_T=1.2;
 /* Air spin — taps only; half-turns, max 720; finish in a normal fall (raise rate, not height) */
 var SPIN_HALF=180,SPIN_MAX=720,SPIN_TOL=30;
 var SPIN_LIFT=Math.round(Math.abs(JV)*0.18); /* once/airtime · ~18% of jump impulse */
@@ -111,6 +114,13 @@ function artSc(){
 function artSize(name){
   if(!ART.ok||!ART.atlas||!ART.atlas.frames[name])return null;
   var f=ART.atlas.frames[name],s=artSc();return {f:f,w:f.w*s,h:f.h*s,img:ART.atlas.img};
+}
+/* Groms: native 1x via artSc, capped at 70% rider H — never upscale past that */
+function gromSize(frame){
+  if(!ART.ok||!ART.atlas||!ART.atlas.frames[frame])return null;
+  var f=ART.atlas.frames[frame],s=artSc(),cap=worldRiderH()*0.70;
+  if(f.h*s>cap)s=cap/f.h;
+  return {f:f,w:f.w*s,h:f.h*s,img:ART.atlas.img};
 }
 function drawArt(name,x,gy,opt){
   var a=artSize(name);if(!a)return false;
@@ -221,10 +231,9 @@ function paintRiderArt(pose,t){
   cx.save();
   /* bob only in air — on snow the board stays planted on the surface line */
   if(pose.air&&name!=='crash')cx.translate(0,Math.sin(t*5)*0.1);
-  /* crash tip in local space, then mirror so all poses face travel (right) */
+  /* crash tip in local space — atlas v2 already faces travel (right), no mirror */
   if(name==='crash')cx.rotate(Math.min(0.35,(S.crashT||0)*0.6));
-  /* Atlas faces left: flip around sprite center via negative dest width */
-  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,a.w/2,-a.h,-a.w,a.h);
+  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
   cx.restore();
   return true;
 }
@@ -328,17 +337,24 @@ function drawCoyote(x,gy,t,ph,ow){
   cx.beginPath();cx.moveTo(x+8,gy-18);cx.quadraticCurveTo(x-6,gy-28+bob,x+4,gy-10);cx.stroke();
   cx.restore();
 }
-function drawGrom(x,gy,t,ow){
-  /* skier faces left — used as on-slope grom obstacle at native scale */
-  if(ART.ok&&drawArt('skier',x+(ow||(artSize('skier')||{w:40}).w)/2,gy,null))return;
-  var bob=Math.sin(t*7)*1.2,asc=(worldRiderH()*0.55)/48;
-  cx.save();cx.translate(x,gy);cx.scale(asc,asc);cx.translate(-x,-gy);
-  cx.fillStyle='rgba(20,30,45,.2)';ell(x+14,gy+2,16,3);cx.fill();
-  cx.fillStyle='#3d6ec9';rr(x+4,gy-34+bob,18,16,4);cx.fill();
-  cx.fillStyle='#e8b890';ell(x+13,gy-40+bob,7,7);cx.fill();
-  cx.fillStyle='#ff5a7a';rr(x+6,gy-48+bob,14,8,3);cx.fill();
-  cx.fillStyle='#2a2f3a';cx.fillRect(x+7,gy-18+bob,5,12);cx.fillRect(x+14,gy-18+bob,5,12);
-  cx.fillStyle='#c4a06a';rr(x-2,gy-6,30,7,3);cx.fill();
+function drawGrom(o,ox,gy){
+  /* Grom 1 atlas — sit or ride, faces downhill (right), native ≤70% rider H */
+  var frame=o.grom==='ride'?'grom_ride':'grom_sit';
+  var a=gromSize(frame);
+  if(a){
+    cx.save();cx.translate(ox+(o.w||a.w)/2,gy);
+    cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
+    cx.restore();return;
+  }
+  /* vector fallback kid — same relative height */
+  var bob=o.grom==='ride'?Math.sin(S.t*7)*1.2:0,asc=(worldRiderH()*0.55)/48;
+  cx.save();cx.translate(ox,gy);cx.scale(asc,asc);cx.translate(-ox,-gy);
+  cx.fillStyle='rgba(20,30,45,.2)';ell(ox+14,gy+2,16,3);cx.fill();
+  cx.fillStyle='#3d6ec9';rr(ox+4,gy-34+bob,18,16,4);cx.fill();
+  cx.fillStyle='#e8b890';ell(ox+13,gy-40+bob,7,7);cx.fill();
+  cx.fillStyle='#ff5a7a';rr(ox+6,gy-48+bob,14,8,3);cx.fill();
+  cx.fillStyle='#2a2f3a';cx.fillRect(ox+7,gy-18+bob,5,12);cx.fillRect(ox+14,gy-18+bob,5,12);
+  cx.fillStyle='#c4a06a';rr(ox-2,gy-6,30,7,3);cx.fill();
   cx.restore();
 }
 
@@ -373,18 +389,39 @@ function stopMusic(){musicOn=false;}
 function tickMusic(now){if(!musicOn||muted||!ac)return;while(now>=nextBeat){kick();S.pulse=1;nextBeat+=BEAT*1000;}}
 
 /* —— state —— */
+function gromPadX(){return SPD*GROM_PAD_T;} /* ~1.2s of travel */
+function gromKindForLevel(){return levelIdx>=1?'ride':'sit';} /* L1 sit · L2+ ride */
+function gromTooClose(x,obs){
+  /* Avoid boulder clusters, kickers (+ landing), gaps — lone rocks OK */
+  var pad=gromPadX(),i,o,rocks=[],pairGap=worldRiderH()*2.2;
+  for(i=0;i<obs.length;i++){
+    o=obs[i];
+    if(o.k==='kicker'){
+      if(x>=o.x-pad&&x<=o.x+o.w+pad*1.4)return true;
+    }else if(o.k==='gap'){
+      if(Math.abs((o.x+o.w/2)-x)<pad)return true;
+    }else if(o.k==='rock'||o.k==='roll')rocks.push(o.x);
+  }
+  rocks.sort(function(a,b){return a-b;});
+  for(i=0;i<rocks.length-1;i++){
+    if(rocks[i+1]-rocks[i]>pairGap)continue;
+    /* grom inside pad of either rock in a tight pair / cluster */
+    if(Math.abs(x-rocks[i])<pad||Math.abs(x-rocks[i+1])<pad)return true;
+  }
+  return false;
+}
 function buildObs(){
   /* Hitboxes follow visual sizes. With art: native atlas frames via artSc (no per-object rescale). */
-  var R=worldRiderH(),obs=[],i,e,x;
-  var B,C,K,G,sc;
+  var R=worldRiderH(),obs=[],i,e,x,groms=[];
+  var B,C,K,sc,gs,gk=gromKindForLevel(),gf=gk==='ride'?'grom_ride':'grom_sit';
   if(ART.ok){
     sc=artSc();
     B={w:ART.atlas.frames.boulder.w*sc,h:ART.atlas.frames.boulder.h*sc};
     C={w:ART.atlas.frames.coyote.w*sc,h:ART.atlas.frames.coyote.h*sc};
     K={w:1.4*R,h:0.85*R}; /* vector kicker */
-    G={w:ART.atlas.frames.skier.w*sc,h:ART.atlas.frames.skier.h*sc};
+    gs=gromSize(gf)||{w:0.42*R,h:0.55*R};
   }else{
-    B={w:0.90*R,h:0.72*R};C={w:0.75*R,h:0.35*R};K={w:1.4*R,h:0.85*R};G={w:0.42*R,h:0.55*R};
+    B={w:0.90*R,h:0.72*R};C={w:0.75*R,h:0.35*R};K={w:1.4*R,h:0.85*R};gs={w:0.42*R,h:0.55*R};
   }
   for(i=0;i<CHART.length;i++){
     e=CHART[i];x=e.x;
@@ -396,23 +433,30 @@ function buildObs(){
     else if(e.t==='gap')obs.push({k:'gap',x:x,w:1.7*R,h:0.65*R});
     else if(e.t==='kicker'){obs.push({k:'kicker',x:x,w:K.w,h:K.h});obs.push({k:'rock',x:x+K.w*1.15,w:B.w,h:B.h,seed:i*11,airGate:1});}
     else if(e.t==='coyote')obs.push({k:'coyote',x:x,w:C.w,h:C.h,seed:i,ph:i});
-    else if(e.t==='grom')obs.push({k:'grom',x:x,w:G.w,h:G.h,seed:i});
+    else if(e.t==='grom')groms.push(x);
+  }
+  /* Place at most one valid grom — sit L1, ride L2+; keep ≥1.2s from clusters/kickers/landings */
+  for(i=0;i<groms.length;i++){
+    x=groms[i];
+    if(gromTooClose(x,obs))continue;
+    obs.push({k:'grom',grom:gk,x:x,w:gs.w,h:gs.h,seed:i,vx:gk==='ride'?SPD*GROM_SPD_FRAC:0});
+    break; /* one grom max in the chart / on screen */
   }
   return obs;
 }
 function reset(keepAttempts){
-  if(!keepAttempts)attempts=0;
+  if(!keepAttempts){attempts=0;lives=LIVES_MAX;}
   ensureBackdrop(curLevel().bg);
   preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   var rx=rideX();
   S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0,
-    spinDeg:0,spinTarget:0,spinBoost:false,spinActive:false,trickPts:0,
+    spinDeg:0,spinTarget:0,spinBoost:false,spinActive:false,trickPts:0,nearPts:0,
     flip:0,flipHold:false,pressAt:0,pressArmed:false,pressFromGround:false};
   /* plant board exactly on surface line after restart */
   S.p.y=gY(S.p.x);S.p.on=true;S.p.vy=0;
   stopMusic();syncUI();
 }
-function score(){return Math.floor(S.dist/10)+S.cleared*25+S.trickPts+(S.done?250:0);}
+function score(){return Math.floor(S.dist/10)+S.cleared*25+S.trickPts+(S.nearPts||0)+(S.done?250:0);}
 function clearSpin(){S.spinDeg=0;S.spinTarget=0;S.spinBoost=false;S.spinActive=false;}
 function clearFlip(){S.flip=0;S.flipHold=false;}
 function clearTricks(){clearSpin();clearFlip();}
@@ -461,9 +505,16 @@ function crash(why){
   S.mode='over';S.fail=why||'Wipeout';S.pop=null;S.flash=-.2;S.crashT=0;clearTricks();S.pressArmed=false;
   /* Pin crash body to slope surface at rider x — never bury under snow */
   S.p.y=gY(S.p.x);S.p.vy=0;S.p.on=true;
+  lives=Math.max(0,lives-1);
   crashSFX();stopMusic();spawnPuff(S.p.x,S.p.y-10,22,'#fff');
   var sc=score();if(sc>pb){pb=sc;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
-  setTimeout(function(){if(S.mode==='over'){attempts++;reset(true);S.mode='play';startMusic();syncUI();}},260);
+  setTimeout(function(){
+    if(S.mode!=='over')return;
+    if(lives<=0){
+      attempts++;reset(false);S.mode='ready';openMenu();syncUI();return;
+    }
+    attempts++;reset(true);S.mode='play';startMusic();syncUI();
+  },260);
 }
 /* World-y floor for board so rider head stays ≤35% from top and clear of HUD */
 function apexFloorY(){
@@ -526,7 +577,10 @@ function step(dt){
   for(var ti=S.trail.length-1;ti>=0;ti--){S.trail[ti].l-=dt;S.trail[ti].x-=SPD*dt*.12;if(S.trail[ti].l<=0)S.trail.splice(ti,1);}
   for(var i=S.parts.length-1;i>=0;i--){var q=S.parts[i];q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=420*dt;q.l-=dt;if(q.l<=0)S.parts.splice(i,1);}
   for(i=0;i<S.obs.length;i++){
-    var o=S.obs[i],ox=o.x-S.dist+p.x;
+    var o=S.obs[i];
+    /* Moving grom rides downhill slower than the player — overtake by jump/pass */
+    if(o.k==='grom'&&o.grom==='ride'&&o.vx)o.x+=o.vx*dt;
+    var ox=o.x-S.dist+p.x;
     if(o.k==='roll'){
       o.spin=(o.spin||0)+dt*4;
       var top=gY(ox)-o.h;
@@ -547,10 +601,25 @@ function step(dt){
       }
       continue;
     }
-    if(o.k==='coyote'||o.k==='grom'){
-      var hh=o.k==='coyote'?28:40,topA=gY(ox)-hh;
+    if(o.k==='coyote'){
+      var hh=28,topA=gY(ox)-hh;
       if(!o.cleared&&ox+o.w<p.x-8){o.cleared=1;S.cleared++;}
-      if(ox<p.x+16&&ox+o.w>p.x-12&&p.y>topA+4&&p.y<gY(ox)+2){crash(o.k==='coyote'?'Coyote':'Grom');return;}
+      if(ox<p.x+16&&ox+o.w>p.x-12&&p.y>topA+4&&p.y<gY(ox)+2){crash('Coyote');return;}
+      continue;
+    }
+    if(o.k==='grom'){
+      /* Hitbox ≈80% of sprite — jump like a small rock; clear = close-call bonus */
+      var gw=o.w*GROM_HIT,gh=o.h*GROM_HIT,gx0=ox+(o.w-gw)/2,gtop=gY(ox+o.w/2)-gh;
+      if(!o.cleared&&ox+o.w<p.x-8){
+        o.cleared=1;S.cleared++;S.nearPts=(S.nearPts||0)+GROM_CLEAR_PTS;
+        S.nearT=.45;S.pop={txt:'CLOSE!',l:.8};beep(1200,.04,'square',.06);
+      }
+      var hitL=p.x-14,hitR=p.x+16,hitB=p.y,hitT=p.y-(p.on?12:38);
+      if(gx0<hitR&&gx0+gw>hitL&&hitB>gtop+2&&hitT<gY(ox+o.w/2)+2){
+        /* Air over: pass without contact */
+        if(!p.on&&hitB<gtop+18){if(!o.near){o.near=1;S.nearT=.4;}}
+        else{crash('Hit grom');return;}
+      }
       continue;
     }
     // rock
@@ -667,7 +736,7 @@ function draw(){
     else if(o.k==='gap'){cx.fillStyle='#1a3048';cx.fillRect(ox,gY(ox)+1,o.w,90);cx.fillStyle='#3a5068';cx.fillRect(ox-8,gY(ox)-5,10,12);cx.fillRect(ox+o.w-2,gY(ox+o.w)-5,10,12);cx.fillStyle='rgba(0,0,0,.2)';cx.fillRect(ox,gY(ox)+1,o.w,14);}
     else if(o.k==='kicker')drawKicker(ox,gY(ox),o.w,o.h);
     else if(o.k==='coyote')drawCoyote(ox,gY(ox),S.t,o.ph||0,o.w);
-    else if(o.k==='grom')drawGrom(ox,gY(ox),S.t,o.w);
+    else if(o.k==='grom')drawGrom(o,ox,gY(ox));
   });
 
   /* plant board onto surface line; light slope tip only (big rotate lifts the deck visually) */
@@ -696,7 +765,7 @@ function draw(){
     }
     cx.textAlign='left';
     hudText('Score '+score(),12,26+hy,'800 24px system-ui,sans-serif','#fff');
-    hudText('Attempt '+Math.max(1,attempts+(S.mode==='play'||S.mode==='over'?1:0)),12,48+hy,'800 13px system-ui,sans-serif','#e8f2ff');
+    hudText('♥ '+lives+'  ·  Attempt '+Math.max(1,attempts+(S.mode==='play'||S.mode==='over'?1:0)),12,48+hy,'800 13px system-ui,sans-serif','#e8f2ff');
     hudText(curLevel().id+' '+curLevel().name,12,70+hy,'800 16px system-ui,sans-serif','#fff');
     /* soft progress track (rounded via path) — not a HUD plate */
     cx.fillStyle='rgba(0,0,0,.35)';rr(barX,barY,barW,12,6);cx.fill();
@@ -743,7 +812,7 @@ function openMenu(){
   var el=document.getElementById('menu');el.style.display='block';
   var lv=curLevel();
   if(menuSheet==='how'){
-    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>JUMP — hold in air to backflip (TP-style)</li><li>Quick air taps (≤150ms) spin — half-turns, max 720</li><li>Land clean on both axes (±30°) or wipeout</li><li>Kickers launch you — air-dodge rocks</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
+    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>JUMP — hold in air to backflip · air taps spin</li><li>Five lives — hit a rock or grom and lose one</li><li>Groms: sit (L1) or ride (L2+) — jump/clear for CLOSE!</li><li>Land clean on both axes (±30°) or wipeout</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
   }else if(menuSheet==='levels'){
     var rows=LEVELS.map(function(L,i){return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+'</b> — resort backdrop</p>';}).join('');
     el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same chart; one backdrop per level.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
@@ -801,7 +870,7 @@ document.getElementById('pause').onclick=function(){if(!S)return;if(S.mode==='pl
 document.getElementById('mute').onclick=function(){muted=!muted;try{localStorage.setItem('bd9.mute',muted?'1':'0')}catch(e){}if(muted)stopMusic();else if(S&&S.mode==='play')startMusic();syncUI();};
 document.getElementById('menu').addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b)return;
-  if(b.id==='playGo'){closeMenu();attempts++;reset(true);S.mode='play';startMusic();syncUI();return;}
+  if(b.id==='playGo'){closeMenu();lives=LIVES_MAX;attempts++;reset(true);S.mode='play';startMusic();syncUI();return;}
   if(b.id==='sheetBack'){menuSheet=null;openMenu();return;}
   if(b.dataset.sheet){menuSheet=b.dataset.sheet;openMenu();}
 });
@@ -813,19 +882,21 @@ window.BoulderDodge={
   version:VER,
   startLevel:function(i){
     if(typeof i==='number')setLevel(i);
-    closeMenu();attempts++;reset(true);S.mode='play';startMusic();syncUI();
+    closeMenu();lives=LIVES_MAX;attempts++;reset(true);S.mode='play';startMusic();syncUI();
   },
   start:function(){if(S.mode==='ready'){S.mode='play';startMusic();syncUI();}},
-  openMenu:openMenu,getState:function(){return S.mode;},getScore:score,
+  openMenu:openMenu,getState:function(){return S.mode;},getScore:score,getLives:function(){return lives;},
   _test:{
     state:function(){return S;},step:step,jump:jump,spinTap:spinTap,beginPress:beginPress,canvasRelease:canvasRelease,
-    holdSet:holdSet,draw:draw,reset:reset,crash:crash,
+    holdSet:holdSet,draw:draw,reset:reset,crash:crash,buildObs:buildObs,gromSize:gromSize,
     setLevel:setLevel,curLevel:curLevel,ensureBackdrop:ensureBackdrop,
     clearSpin:clearSpin,clearFlip:clearFlip,clearTricks:clearTricks,
     spinLandingClean:spinLandingClean,flipLandingClean:flipLandingClean,spinTier:spinTier,landFromAir:landFromAir,
+    getLives:function(){return lives;},setLives:function(n){lives=Math.max(0,Math.min(LIVES_MAX,n|0));},
     consts:{DT:DT,SPD:SPD,L1_LEN:L1_LEN,RIDER_H_FRAC:RIDER_H_FRAC,RIDER_LOCAL_H:RIDER_LOCAL_H,JV:JV,G:G,
       SPIN_HALF:SPIN_HALF,SPIN_MAX:SPIN_MAX,SPIN_TOL:SPIN_TOL,SPIN_LIFT:SPIN_LIFT,SPIN_RATE:SPIN_RATE,SPIN_PTS:SPIN_PTS,
-      TAP_MS:TAP_MS,FLIP_RATE:FLIP_RATE,FLIP_TOL:FLIP_TOL,APEX_TOP_FRAC:APEX_TOP_FRAC},
+      TAP_MS:TAP_MS,FLIP_RATE:FLIP_RATE,FLIP_TOL:FLIP_TOL,APEX_TOP_FRAC:APEX_TOP_FRAC,
+      LIVES_MAX:LIVES_MAX,GROM_SPD_FRAC:GROM_SPD_FRAC,GROM_HIT:GROM_HIT,GROM_CLEAR_PTS:GROM_CLEAR_PTS,GROM_PAD_T:GROM_PAD_T},
     apexFloorY:apexFloorY,clampApex:clampApex,
     measureRider:function(){
       var playCss=innerHeight,riderCss=RIDER_H_FRAC*playCss;
