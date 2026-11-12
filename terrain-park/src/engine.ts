@@ -21,10 +21,19 @@ const SPIN = (Math.PI * 2) / AIR;
 const AIR_BOOST_FRAC = 0.14;
 /** Max pointer/key down duration to count as a tap (not a hold/flip). */
 const TAP_MS = 150;
-/** Landing window (°): must be within this of a half/full turn on each axis or crash. */
-const SPIN_LAND_WIN_DEG = 30;
+/**
+ * Landing window (°): must be within this of a half/full turn on each axis or crash.
+ * Ted playtest (562cc4a): ±30° landed ~1/5 for a skilled player — widen so a
+ * reasonably timed flip sticks most of the time (~3–4/5), while ~90° misses still crash.
+ */
+const SPIN_LAND_WIN_DEG = 52;
 /** Below this absolute rotation on an axis, treat as no-rotation on that axis. */
-const SPIN_NO_DEG = 25;
+const SPIN_NO_DEG = 38;
+/**
+ * Standard park kicker amp (67.5). At or below this = small jump: one flip max
+ * and yaw capped at 360°. Bigger amp / hang unlocks multi-flip + 540…1080.
+ */
+const SMALL_JUMP_AMP = KICKER_FRAME.h / 2;
 /** Each post-boost air tap adds one half-turn (180°) of yaw spin. */
 const TAP_SPIN_HALF = Math.PI;
 /** Scored yaw tiers (degrees) from tap spins. */
@@ -118,6 +127,8 @@ export type Snap = {
   showResume: boolean;
   hint: string | null;
   showLegend: boolean;
+  /** First-run board-upgrade explanation (dismissible). */
+  showIntro: boolean;
   pb: number;
   careerStars: number;
   diffId: string;
@@ -222,10 +233,10 @@ const HILL = [0, 28, 32, 36, 40, 44, 48, 52, 56, 60, 62];
   // Drawn MT_* mountain stacks removed — opaque resort backdrops provide scenery.
 
 type Progress = { done: number[]; best: Record<string, number>; stars: number; diff: string; board: string };
-type SaveShape = { progress: Progress; pb: number; mute: boolean; hint: boolean; legend: boolean };
+type SaveShape = { progress: Progress; pb: number; mute: boolean; hint: boolean; legend: boolean; intro: boolean };
 
 function loadSave(): SaveShape {
-  const blank: SaveShape = { progress: { done: [], best: {}, stars: 0, diff: "normal", board: "grom" }, pb: 0, mute: false, hint: false, legend: false };
+  const blank: SaveShape = { progress: { done: [], best: {}, stars: 0, diff: "normal", board: "grom" }, pb: 0, mute: false, hint: false, legend: false, intro: false };
   try {
     const raw = localStorage.getItem("terrainPark.progress");
     if (raw) {
@@ -236,6 +247,7 @@ function loadSave(): SaveShape {
     blank.mute = localStorage.getItem("terrainPark.mute") === "1";
     blank.hint = localStorage.getItem("terrainPark.hint") === "1";
     blank.legend = localStorage.getItem("terrainPark.legend2") === "1";
+    blank.intro = localStorage.getItem("terrainPark.intro") === "1";
   } catch {
     /* private mode must not abort boot — that blanked Boulder Dodge */
   }
@@ -275,6 +287,8 @@ type State = {
   airBoostUsed: boolean;
   /** Tap-yaw spin (radians). Hold backflips stay on `flip`; taps add half-turns here. */
   yaw: number;
+  /** Takeoff feature amp (0 = ground/grind hop). Gates multi-flip / high spin tiers. */
+  airAmp: number;
   /** +1 frontside, −1 backside. */
   spinDir: number;
   grab: GrabId;
@@ -299,6 +313,7 @@ export type Game = {
   openMenu: () => void;
   closeMenu: () => void;
   dismissLegend: () => void;
+  dismissIntro: () => void;
   openLegend: () => void;
   replay: () => void;
   nextLine: () => void;
@@ -321,6 +336,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   let muted = save0.mute;
   let hintSeen = save0.hint;
   let legendSeen = save0.legend;
+  let introSeen = save0.intro;
   let lives = LIVES_MAX;
   let LV: Level = LEVELS[0]!;
   let god = false;
@@ -672,7 +688,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       land: 0, landBad: 0, hop: 0, climbVy: 0, mode: "ready" as Mode, prevMode: "ready" as Mode, t: 0, dist: 0,
       spd: LV.base * m0, p: { x: 110, y: gy0, vy: 0, on: true }, nextX: 780, shake: 0, done: false, flip: 0,
       holding: false, lastTap: 0, playAt: 0, trickProg: 0, trickDone: false, trickFlips: 0, trickRamps: 0,
-      trickCombos: 0, trickGrabs: 0, trickRails: 0, airFrom: null, airBoostUsed: false, yaw: 0, spinDir: 1, grab: null,
+      trickCombos: 0, trickGrabs: 0, trickRails: 0, airFrom: null, airBoostUsed: false, yaw: 0, airAmp: 0, spinDir: 1, grab: null,
       grabEase: 0, grabHeld: false, windup: 0, grindStyle: "fifty" as GrindStyle,
       grindExit: false, heartFlashT: 0, heartGainT: 0, heartAt: 0, lostHeart: -1,
       autoRetry: false, gameOver: false, postLip: 0, lessonPlaced: false, missed: false, achT: 0, achToast: "",
@@ -957,20 +973,45 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     while (heartsOk() && sc >= (S.heartAt + 1) * HEART_SCORE) { S.heartAt++; gainLife(); }
   }
 
+  /** Small park kicker / hop: one flip + 360 yaw max. Bigger amp unlocks multi-flip / 540+. */
+  function isSmallAir() {
+    return S.airAmp <= SMALL_JUMP_AMP + 1e-6;
+  }
+  function maxAirFlipRad() {
+    return isSmallAir() ? TAU : TAU * 2.05;
+  }
+  function maxAirYawRad() {
+    return isSmallAir() ? Math.PI * 2 : YAW_MAX;
+  }
+  function clampAirSpin() {
+    const mf = maxAirFlipRad();
+    if (Math.abs(S.flip) > mf) S.flip = Math.sign(S.flip || 1) * mf;
+    const my = maxAirYawRad();
+    if (Math.abs(S.yaw) > my) S.yaw = Math.sign(S.yaw || 1) * my;
+  }
+
   function settleSpin(dt: number) {
     // Hold = backflips exactly as before (continuous while held). Taps do not drive this axis.
     const dir = S.spinDir >= 0 ? 1 : -1;
-    if (S.holding && !S.p.on) S.flip += SPIN * dt * dir;
-    else if (S.holding && S.grindOn) S.flip += SPIN * 0.75 * dt * dir;
-    else if (!S.holding && S.grindOn) S.flip *= Math.pow(GRIND_FRIC, dt * 6);
+    if (S.holding && !S.p.on) {
+      S.flip += SPIN * dt * dir;
+      clampAirSpin();
+    } else if (S.holding && S.grindOn) {
+      S.flip += SPIN * 0.75 * dt * dir;
+      clampAirSpin();
+    } else if (!S.holding && S.grindOn) S.flip *= Math.pow(GRIND_FRIC, dt * 6);
     else if (!S.p.on && !S.holding) {
       const into = Math.abs(S.flip) / TAU;
       const base = Math.floor(into);
       const frac = into - base;
-      const commit = S.postLip > 0 ? 0.55 : 0.72;
-      const targetAbs = (frac >= commit ? base + 1 : base) * TAU;
+      // More generous coast-settle so a late release still finishes the turn.
+      const commit = S.postLip > 0 ? 0.38 : 0.48;
+      let targetAbs = (frac >= commit ? base + 1 : base) * TAU;
+      const mf = maxAirFlipRad();
+      if (targetAbs > mf) targetAbs = mf;
       const target = Math.sign(S.flip || dir) * targetAbs;
-      S.flip += (target - S.flip) * Math.min(1, dt * 9);
+      S.flip += (target - S.flip) * Math.min(1, dt * 11);
+      clampAirSpin();
     }
   }
 
@@ -1042,6 +1083,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     const clearAirSpin = () => {
       S.airBoostUsed = false;
       S.yaw = 0;
+      S.airAmp = 0;
       S.flip = 0; S.grab = null; S.grabEase = 0; S.grabHeld = false; S.windup = 0;
       S.grindExit = false; S.airFrom = null; S.grindStyle = "fifty";
     };
@@ -1171,8 +1213,10 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     const wasGrind = !!S.grindOn;
     p.vy = JV * board().pop * (wasGrind && fromK === "rail" ? 1.06 : wasGrind && fromK === "log" ? 1.03 : 1);
     p.on = false;
-    if (wasGrind) { S.airFrom = fromK; S.grindExit = true; }
-    else { const lf0 = lipNear(); if (lf0) S.airFrom = lf0.k; }
+    const lf0 = wasGrind ? null : lipNear();
+    if (wasGrind) { S.airFrom = fromK; S.grindExit = true; S.airAmp = 0; }
+    else if (lf0) { S.airFrom = lf0.k; S.airAmp = lf0.amp || 0; }
+    else { S.airFrom = null; S.airAmp = 0; }
     S.grindOn = null;
     S.airBoostUsed = false;
     S.yaw = 0;
@@ -1182,8 +1226,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       S.pops.push({ x: p.x, y: p.y - 52, l: 0.55, txt: fromK === "rail" ? "RAIL POP" : fromK === "log" ? "LOG POP" : "POP" });
       beep(640, 0.04, "square", 0.07);
     }
-    const lf = lipNear();
-    if (lf && !S.lipHit[lf.wx]) awardLip(lf);
+    if (lf0 && !S.lipHit[lf0.wx]) awardLip(lf0);
   }
 
   /**
@@ -1203,10 +1246,15 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       beep(500, 0.035, "triangle", 0.06);
       return;
     }
-    // +180° yaw per tap (capped at 1080°).
+    // +180° yaw per tap. Small jumps cap at 360°; bigger amp unlocks through 1080°.
     const dir = S.spinDir >= 0 ? 1 : -1;
+    const cap = maxAirYawRad();
+    if (Math.abs(S.yaw) >= cap - 1e-6) {
+      beep(320, 0.025, "triangle", 0.04);
+      return;
+    }
     S.yaw += TAP_SPIN_HALF * dir;
-    if (Math.abs(S.yaw) > YAW_MAX) S.yaw = Math.sign(S.yaw) * YAW_MAX;
+    if (Math.abs(S.yaw) > cap) S.yaw = Math.sign(S.yaw) * cap;
     S.lastTap = now;
     const halfs = Math.round(Math.abs(S.yaw) / Math.PI);
     beep(480 + Math.min(6, halfs) * 55, 0.03, "square", 0.065);
@@ -1221,7 +1269,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     S.heartFlashT = LIFE_PAUSE;
     S.autoRetry = false;
     S.grindExit = false; S.airFrom = null;
-    S.airBoostUsed = false; S.yaw = 0; S.flip = 0;
+    S.airBoostUsed = false; S.yaw = 0; S.airAmp = 0; S.flip = 0;
     if (!reduce) { S.shake = 10; S.flash = -0.35; }
     puff(S.p.x, S.p.y - 10, 22, "#ffffff", 220);
     const sc = score();
@@ -1324,7 +1372,8 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
         if (!S.holding) S.flip = 0;
         S.airBoostUsed = false;
         S.yaw = 0;
-        if (lf0) S.airFrom = lf0.k;
+        if (lf0) { S.airFrom = lf0.k; S.airAmp = lf0.amp || 0; }
+        else { S.airFrom = null; S.airAmp = 0; }
         S.lastTap = performance.now();
         S.postLip = POST_LIP * diff().lip * board().lip;
         puff(p.x, p.y - 2, kick ? 12 : 8, "#ffffff", kick ? 140 : 110);
@@ -2957,9 +3006,10 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       showReplay: m === "over" || m === "clear",
       showNext: m === "clear" && !LV.endless,
       showResume: !menu && !leg && m === "pause",
-      hint: m === "ready" && !hintSeen
+      hint: m === "ready" && !hintSeen && introSeen
         ? "Riding " + board().name + ". Hold to flip, tap in the air to spin. Swipe for grabs & rail tricks. " + (tg?.lab || "") + "."
         : null,
+      showIntro: !introSeen && (m === "ready" || m === "play"),
       showLegend: leg, pb, careerStars: careerFromBest(), diffId: diff().id,
       diffs: Object.values(DIFFS),
       levels: [...LEVELS, ENDLESS].map((L) => ({
@@ -2982,9 +3032,21 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     if (force || next !== sig) { sig = next; onSnap(snap); }
   }
 
+  function dismissIntro() {
+    if (introSeen) return;
+    introSeen = true;
+    store("terrainPark.intro", "1");
+    emit(true);
+  }
+
   function press() {
     ensureAC();
     if (S.mode === "legend") { dismissLegend(); return; }
+    if (!introSeen) {
+      dismissIntro();
+      // Ready: continue into PLAY. Play: dismiss only — don't also jump.
+      if (S.mode !== "ready") return;
+    }
     if (S.mode === "ready") {
       if (!hintSeen) { hintSeen = true; store("terrainPark.hint", "1"); }
       S.mode = "play"; S.playAt = performance.now(); emit(true); return;
@@ -3136,6 +3198,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     consts: {
       AIR, SPIN, LIP_WIN, POST_LIP, GRAVITY, JV, DIFFS, LEN_MUL,
       AIR_BOOST_FRAC, TAP_MS, SPIN_LAND_WIN_DEG, SPIN_NO_DEG, SPIN_TIERS_DEG, SPIN_PTS, TAP_SPIN_HALF, YAW_MAX,
+      SMALL_JUMP_AMP,
     },
     starsFor,
     lineLength,
@@ -3203,6 +3266,11 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     setFlip(rad: number) { S.flip = rad; },
     setYaw(rad: number) { S.yaw = rad; },
     setAirBoostUsed(v: boolean) { S.airBoostUsed = !!v; },
+    setAirAmp(a: number) { S.airAmp = Math.max(0, a); },
+    dismissIntro,
+    isSmallAir: () => isSmallAir(),
+    maxAirYawDeg: () => maxAirYawRad() * (180 / Math.PI),
+    maxAirFlipDeg: () => maxAirFlipRad() * (180 / Math.PI),
     /** Draw pose QA sheet (grabs / rails / spins) for evidence screenshots. */
     renderPoseSheet() { renderPoseSheet(); },
     /** World AABB → CSS-pixel screen AABB (for Playwright overlap asserts). */
@@ -3343,7 +3411,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   (window as unknown as { TerrainPark?: typeof api }).TerrainPark = api;
 
   return {
-    press, hold, aim, togglePause, toggleMute, openMenu, closeMenu, dismissLegend, openLegend, startLevel, setDiff, selectBoard, resetProgress, resize, getSnap,
+    press, hold, aim, togglePause, toggleMute, openMenu, closeMenu, dismissLegend, dismissIntro, openLegend, startLevel, setDiff, selectBoard, resetProgress, resize, getSnap,
     replay: replayLine, nextLine: goNext,
     destroy() {
       alive = false; cancelAnimationFrame(raf); scrapeStop();

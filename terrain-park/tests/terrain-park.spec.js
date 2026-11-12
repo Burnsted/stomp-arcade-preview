@@ -35,6 +35,23 @@ test.describe("Terrain Park v0.5.1-next", () => {
     const version = await page.evaluate(() => window.TerrainPark.version);
     expect(version).toBe("0.5.1-next");
 
+    // (d) First-run board intro — shown once, dismissible (not a long tutorial wall)
+    await page.evaluate(() => {
+      localStorage.removeItem("terrainPark.intro");
+    });
+    await page.reload();
+    await waitGame(page);
+    await expect(page.getByRole("dialog", { name: "How boards unlock" })).toBeVisible();
+    await expect(page.getByText("Clear lines. Ride faster.")).toBeVisible();
+    await expect(page.getByText(/Grom Deck is your starter/)).toBeVisible();
+    await expect(page.getByText(/1 line → Log Cruiser/)).toBeVisible();
+    await page.getByRole("button", { name: "Got it" }).click();
+    await expect(page.getByRole("dialog", { name: "How boards unlock" })).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("terrainPark.intro"))).toBe("1");
+    await page.reload();
+    await waitGame(page);
+    await expect(page.getByRole("dialog", { name: "How boards unlock" })).toHaveCount(0);
+
     // Boot into play with jump available
     await expect(page.locator("button.jump.air")).toBeVisible();
 
@@ -767,10 +784,12 @@ print(out, im.size)
         const C = await page.evaluate(() => window.TerrainPark.consts);
         expect(C.SPIN_TIERS_DEG).toEqual([360, 540, 720, 900, 1080]);
         expect(C.SPIN_PTS[720]).toBe(300);
-        expect(C.SPIN_LAND_WIN_DEG).toBe(30);
+        expect(C.SPIN_LAND_WIN_DEG).toBe(52);
+        expect(C.SPIN_NO_DEG).toBe(38);
+        expect(C.SMALL_JUMP_AMP).toBe(67.5);
         expect(C.TAP_MS).toBeLessThanOrEqual(150);
 
-        // Spam air taps: one boost only, then +180° yaw each (no repeat float).
+        // Spam air taps on a BIG jump: one boost only, then +180° yaw each (no repeat float).
         const spam = await page.evaluate(() => {
           const TP = window.TerrainPark;
           TP.setGod(true); TP.setOverview(false); TP.debugStart(3);
@@ -778,6 +797,7 @@ print(out, im.size)
           const S = TP.state();
           S.feats = []; S.pops = [];
           TP.jump();
+          TP.setAirAmp(90); // bigger than standard kicker → unlock 540…1080
           const vy0 = S.p.vy;
           TP.airTap(); // second tap = boost
           const afterBoost = TP.getSpinState();
@@ -789,10 +809,14 @@ print(out, im.size)
             vy0, vy1, vy2,
             boostOnce: afterBoost.airBoostUsed === true,
             yawDeg: afterSpam.yawDeg,
+            small: TP.isSmallAir(),
+            maxYaw: TP.maxAirYawDeg(),
             ptsTable: TP.consts.SPIN_PTS,
           };
         });
         expect(spam.boostOnce).toBe(true);
+        expect(spam.small).toBe(false);
+        expect(spam.maxYaw).toBeCloseTo(1080, 0);
         expect(spam.vy1).toBeLessThan(spam.vy0);
         expect(spam.vy2).toBeGreaterThanOrEqual(spam.vy1 - 5);
         expect(spam.yawDeg).toBeCloseTo(1080, 0);
@@ -856,13 +880,14 @@ print(out, im.size)
         expect(underYaw.mode).toBe("over");
         expect(underYaw.lives).toBe(4);
 
-        // Over-rotation crash on yaw axis (≈450°)
+        // Over-rotation crash on yaw axis (≈450°) — big jump so clamp doesn't snap it to 360
         const over = await page.evaluate(() => {
           const TP = window.TerrainPark;
           TP.setGod(false); TP.setLives(5); TP.debugStart(1);
           const S = TP.state();
           S.feats = []; S.pops = [];
           S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setAirAmp(90);
           TP.setFlip(0);
           TP.setYaw((450 * Math.PI) / 180);
           TP.setAirBoostUsed(true);
@@ -872,7 +897,72 @@ print(out, im.size)
         expect(over.mode).toBe("over");
         expect(over.lives).toBe(4);
 
-        // Clean 720 yaw land (flip axis clean / zero)
+        // (a) Generous landing window: ~40° off a full flip on the standard kicker still sticks
+        const generous = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = []; S.flipPts = 0;
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
+          TP.setFlip((320 * Math.PI) / 180); // 40° under 360 — old ±30 window would crash
+          TP.setYaw(0);
+          TP.setSpinDir(1);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          return { ...TP.getSpinState(), pops: S.pops.map((p) => p.txt) };
+        });
+        expect(generous.mode).toBe("play");
+        expect(generous.lives).toBe(5);
+        expect(generous.lastTrickName.length).toBeGreaterThan(0);
+
+        // (b) Badly mistimed flip (~90°) still crashes
+        const mistimed = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 520; S.p.y = 292;
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
+          TP.setFlip(Math.PI * 0.5);
+          TP.setYaw(0);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 8; i++) TP.step(1 / 60);
+          return TP.getSpinState();
+        });
+        expect(mistimed.mode).toBe("over");
+        expect(mistimed.lives).toBe(4);
+
+        // (c) Small jump cannot wind a 720 / second flip
+        const smallCap = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(1);
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          TP.jump();
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
+          TP.airTap(); // boost
+          for (let i = 0; i < 8; i++) TP.airTap();
+          const yawAfter = TP.getSpinState().yawDeg;
+          // Hold long enough that settle would want a double if uncapped
+          S.holding = true;
+          for (let i = 0; i < 90; i++) TP.step(1 / 60);
+          const flipAfter = TP.getSpinState().flipDeg;
+          return {
+            small: TP.isSmallAir(),
+            maxYaw: TP.maxAirYawDeg(),
+            maxFlip: TP.maxAirFlipDeg(),
+            yawAfter,
+            flipAfter,
+          };
+        });
+        expect(smallCap.small).toBe(true);
+        expect(smallCap.maxYaw).toBeCloseTo(360, 0);
+        expect(smallCap.maxFlip).toBeCloseTo(360, 0);
+        expect(smallCap.yawAfter).toBeLessThanOrEqual(360.5);
+        expect(smallCap.flipAfter).toBeLessThanOrEqual(365);
+
+        // Clean 720 yaw land on a bigger jump (flip axis clean / zero)
         const clean720 = await page.evaluate(() => {
           const TP = window.TerrainPark;
           TP.setGod(false); TP.setLives(5); TP.debugStart(1);
@@ -880,6 +970,7 @@ print(out, im.size)
           const S = TP.state();
           S.feats = []; S.pops = []; S.flipPts = 0;
           S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setAirAmp(90);
           TP.setFlip(0);
           TP.setYaw((720 * Math.PI) / 180);
           TP.setSpinDir(1);
@@ -895,13 +986,14 @@ print(out, im.size)
         expect(clean720.flipPts).toBeGreaterThanOrEqual(300);
         expect(clean720.pops.some((t) => /720!/.test(t))).toBe(true);
 
-        // Flip + 360 combine lands clean
+        // Flip + 360 combine lands clean (allowed on small jump)
         const combo = await page.evaluate(() => {
           const TP = window.TerrainPark;
           TP.setGod(false); TP.setLives(5); TP.debugStart(1);
           const S = TP.state();
           S.feats = []; S.pops = []; S.flipPts = 0;
           S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
           TP.setFlip(Math.PI * 2); // full flip
           TP.setYaw(Math.PI * 2); // 360 yaw
           TP.setSpinDir(1);
@@ -930,6 +1022,7 @@ print(out, im.size)
           S.feats = []; S.pops = [];
           S.p.on = true; S.p.vy = 0;
           TP.jump();
+          TP.setAirAmp(90);
           TP.setSpinDir(1);
           TP.airTap(); // boost
           TP.airTap(); TP.airTap(); TP.airTap(); TP.airTap(); // 720 yaw
@@ -937,6 +1030,7 @@ print(out, im.size)
         for (let f = 0; f < 10; f++) {
           await page.evaluate((fi) => {
             const TP = window.TerrainPark;
+            TP.setAirAmp(90);
             for (let i = 0; i < 4; i++) TP.step(1 / 60);
             if (fi === 6) TP.setYaw((700 * Math.PI) / 180);
             if (fi === 8) {
@@ -944,6 +1038,7 @@ print(out, im.size)
               S.p.vy = 120; S.p.y = 290;
               TP.setFlip(0);
               TP.setYaw((720 * Math.PI) / 180);
+              TP.setAirAmp(90);
             }
           }, f);
           await page.waitForTimeout(20);
@@ -991,6 +1086,92 @@ def strip(src, out, n=8):
 strip(${JSON.stringify(stripDirs.land)}, ${JSON.stringify(path.join(ART, "phone-spin-720-strip.png"))}, 10)
 strip(${JSON.stringify(stripDirs.crash)}, ${JSON.stringify(path.join(ART, "phone-spin-crash-strip.png"))}, 8)
 `]);
+
+        // Ted playtest QA shots (390×844): intro, stuck flip, mistimed crash, multi-flip
+        // Storage is mocked to throw here — reload alone yields introSeen=false (blank save).
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.reload();
+        await waitGame(page);
+        await expect(page.getByRole("dialog", { name: "How boards unlock" })).toBeVisible();
+        await page.screenshot({ path: path.join(ART, "phone-intro-boards.png") });
+        await page.getByRole("button", { name: "Got it" }).click();
+        await expect(page.getByRole("dialog", { name: "How boards unlock" })).toHaveCount(0);
+
+        // Stuck single-flip landing on the small/standard jump (amp 67.5, ±52° window)
+        const landOk = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = []; S.flipPts = 0;
+          S.p.on = false; S.p.vy = 80; S.p.y = 280;
+          S.holding = false;
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
+          TP.setFlip((320 * Math.PI) / 180);
+          TP.setYaw(0);
+          TP.setSpinDir(1);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 40; i++) TP.step(1 / 60);
+          const st = TP.getSpinState();
+          // Place the standard kicker behind the rider for the frame (art context only).
+          const kickWx = S.dist + S.p.x - 90;
+          S.feats.push({
+            k: "kicker", wx: kickWx, w: 0, h: 0, ap: 72, dk: 16, ex: 118,
+            amp: TP.consts.SMALL_JUMP_AMP, gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table", hit: true,
+          });
+          S.mode = "pause";
+          TP.step(0);
+          return { mode: st.mode, lives: st.lives, flipPts: st.flipPts, name: st.lastTrickName, pops: S.pops.map((p) => p.txt) };
+        });
+        expect(landOk.mode).toBe("play");
+        expect(landOk.lives).toBe(5);
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-flip-land-small.png") });
+
+        // Mistimed crash still happens (~90° under-rotation)
+        const crashOk = await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(false); TP.setLives(5); TP.debugStart(1); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = 520; S.p.y = 292;
+          S.holding = false;
+          TP.setAirAmp(TP.consts.SMALL_JUMP_AMP);
+          TP.setFlip(Math.PI * 0.5);
+          TP.setYaw(0);
+          TP.setAirBoostUsed(true);
+          for (let i = 0; i < 8; i++) TP.step(1 / 60);
+          const st = TP.getSpinState();
+          return { mode: st.mode, lives: st.lives };
+        });
+        expect(crashOk.mode).toBe("over");
+        expect(crashOk.lives).toBe(4);
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-flip-crash-mistimed.png") });
+
+        // Multi-flip on a bigger jump (amp 90 > standard 67.5)
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(9); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          const kickWx = S.dist + S.p.x + 80;
+          S.feats.push({
+            k: "kicker", wx: kickWx, w: 0, h: 0, ap: 80, dk: 18, ex: 130,
+            amp: 90, gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table",
+          });
+          S.dist = kickWx - S.p.x - 10;
+          S.p.on = false; S.p.vy = -180; S.p.y = 200;
+          TP.setAirAmp(90);
+          TP.setFlip(Math.PI * 3.6); // ~1.8 flips mid air
+          TP.setYaw((540 * Math.PI) / 180);
+          TP.setSpinDir(1);
+          TP.setAirBoostUsed(true);
+          S.holding = false;
+          S.mode = "pause";
+          TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-multiflip-big.png") });
       }
 
       // (f) overview

@@ -4,7 +4,7 @@ import { createGame, type Game, type Snap } from "./engine";
 const EMPTY: Snap = {
   mode: "ready", muted: false, levelName: "Butter Hits", levelN: 1, endless: false, lives: 5,
   primary: "PLAY", showJump: false, showPlay: false, showReplay: false, showNext: false, showResume: false,
-  hint: null, showLegend: false, pb: 0, careerStars: 0, diffId: "normal", diffs: [], levels: [], boards: [],
+  hint: null, showLegend: false, showIntro: false, pb: 0, careerStars: 0, diffId: "normal", diffs: [], levels: [], boards: [],
   nowName: "Grom Deck", nowTag: "speed ×1.00 · wider lip", nextName: null, nextHow: "", nextTag: "",
   runStars: 0, bestStars: 0, starGoal: 160, runScore: 0, goalDone: false, confirmReset: false,
 };
@@ -101,6 +101,15 @@ export function TerrainPark() {
       <button className="chrome-btn menu" type="button" aria-label="Park menu" onClick={() => (snap.mode === "menu" ? g()?.closeMenu() : snap.mode === "legend" ? g()?.dismissLegend() : g()?.openMenu())}><MenuIcon /></button>
       <button className="chrome-btn mute" type="button" aria-label={snap.muted ? "Unmute" : "Mute"} onClick={() => g()?.toggleMute()}>{snap.muted ? <MuteIcon /> : <VolumeIcon />}</button>
       <button className="chrome-btn pause" type="button" aria-label="Pause" onClick={() => g()?.togglePause()}><PauseIcon /></button>
+      {snap.showIntro && (
+        <div className="intro" role="dialog" aria-label="How boards unlock">
+          <p className="kicker">Boards</p>
+          <h2>Clear lines. Ride faster.</h2>
+          <p>Grom Deck is your starter. Clear lines to unlock better boards — they ride faster and pop higher.</p>
+          <p className="boardline">1 line → Log Cruiser · 3 → Rail Steel · 6 → Kicker Pop · 10 → Pro Park</p>
+          <button type="button" className="intro-go" onClick={(e) => { e.preventDefault(); e.stopPropagation(); g()?.dismissIntro(); }}>Got it</button>
+        </div>
+      )}
       {snap.hint && <div className="hint">{snap.hint}</div>}
       {showCard && (
         <div className="result" role="status">
