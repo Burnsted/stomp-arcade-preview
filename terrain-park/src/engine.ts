@@ -1,7 +1,7 @@
 /** Terrain Park — tip build. Park identity, not a dodge corridor. */
 
 import {
-  loadArt, ensureBackdrop, drawAtlasFrame, frameWu, RIDER_FRAMES, WORLD_FRAMES, GROM_FRAMES,
+  loadArt, ensureBackdrop, drawAtlasFrame, frameWu, RIDER_FRAMES, WORLD_FRAMES, GROM_FRAMES, KICKER_FRAME,
   RIDE_ATLAS_H, RIDE_NATIVE_CSS,
   BG_W, BG_H, BG_SRC_TOP, BG_SRC_END, BG_SRC_H,
   type ArtKit, type RiderFrameId, type BackdropId,
@@ -159,7 +159,8 @@ const FEAT: Record<string, FeatDef> = {
   log: { w: 210, h: 16, ride: 1, grind: 1, lab: "Log slide" },
   box: { w: 160, h: 14, ride: 1, grind: 1, lab: "Box" },
   flat: { w: 0, h: 0, terr: 1, ap: 54, dk: 86, ex: 78, amp: 28, lab: "Flat top" },
-  kicker: { w: 0, h: 0, terr: 1, ap: 72, dk: 16, ex: 118, amp: WORLD_FRAMES.kicker.h / 2, lab: "Kicker", kick: 1 },
+  // Franz snow kicker v1 — height still 135@2x → amp 67.5. Extra width is approach+landing only.
+  kicker: { w: 0, h: 0, terr: 1, ap: 72, dk: 16, ex: 118, amp: KICKER_FRAME.h / 2, lab: "Kicker", kick: 1 },
   // Franz Grom 1 — native÷2 (~60 CSS ride ≈ 70% of adult). Sit uses shorter hitbox.
   grom: { w: GROM_FRAMES.grom_ride.w / 2, h: GROM_FRAMES.grom_ride.h / 2, mob: 1, vx: 30, lab: "Grom" },
   skier: { w: WORLD_FRAMES.skier.w / 2, h: WORLD_FRAMES.skier.h / 2, mob: 1, vx: 72, lab: "Skier" },
@@ -386,7 +387,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   /** When set, draw() paints the pose QA sheet instead of the ride (frozen for screenshots). */
   let poseSheetLock = false;
   /** Franz atlases + resort backdrops — null/failed → vector / skip fallback. */
-  let art: ArtKit = { ready: false, rider: null, world: null, grom: null, bg: {}, bgSky: {} };
+  let art: ArtKit = { ready: false, rider: null, world: null, grom: null, kicker: null, bg: {}, bgSky: {} };
   /** At most one Franz grom per gap between park features (from level 2). */
   let gapHasGrom = false;
   /** Forced backdrop for evidence shots; null = alternate by level. */
@@ -1814,6 +1815,39 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       cx.beginPath(); cx.moveTo(x, y + 2); cx.lineTo(x + 3, y + 6); cx.stroke();
     }
   }
+  /**
+   * Franz Terrain Park kicker snow v1.
+   * Seat bottom on BASE slope (snowY), buried ~6–10 CSS px. Never gY. Never mound fill / white wedge.
+   * Lip spray + callout only. Facing +X, no flip. Physics amp stays 67.5 (height 135@2x).
+   */
+  function drawKickerSprite(f: Feat, sx: number) {
+    const lipX = sx + f.dk;
+    const deck0 = sx - f.dk;
+    const L = sx - (f.ap + f.dk);
+    if (art.kicker) {
+      const fr = KICKER_FRAME;
+      const { w: kw } = sprWu(fr);
+      // Align sprite left with approach start so the extra width is approach+landing.
+      const ax = L + kw * 0.5;
+      const buryWu = (8 * atlasDpr()) / Math.max(1e-6, scale); // ~8 CSS px into the pack
+      const baseY = snowY(ax); // BASE slope — not featured gY
+      const seatY = baseY + buryWu;
+      contactShadow(ax, baseY + 1, Math.min(kw * 0.46, f.ap * 0.6 + 36), 5.5, 0.2);
+      // Flat-bottom landform; facing right; no horizontal flip; no tilt.
+      drawAtlasFrame(cx, art.kicker, fr, ax, seatY, atlasDpr(), scale, spriteG, 1, 0);
+    }
+    // Lip spray only (no mound fill / highlight / corduroy wedge under the sprite).
+    cx.fillStyle = "rgba(255,255,255,0.7)";
+    for (let i = 0; i < 5; i++) {
+      const px = lipX - 4 + i * 5 + Math.sin(S.t * 9 + i) * 2;
+      const py = snowY(lipX) - 10 - i * 3 - Math.cos(S.t * 7 + i) * 2;
+      cx.beginPath();
+      cx.arc(px, py, 1.2, 0, Math.PI * 2);
+      cx.fill();
+    }
+    if (overviewCam) overviewTag("KICKER", sx, snowY(deck0) - f.amp * 0.35 - 20);
+    else callout(f, "KICKER", sx, snowY(deck0) - f.amp * 0.35 - 18, "#e8772e");
+  }
   /** Feature built INTO the snow — no floating slab. Surface already shaped by featH/gY. */
   function drawTerrFeature(f: Feat, sx: number) {
     const L = sx - (f.ap + f.dk); const R = sx + f.dk + f.ex;
@@ -2036,20 +2070,13 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       if (overviewCam) overviewTag("LOG", sx, y - 16);
       else if (!S.grindOn || S.grindOn !== f) callout(f, "LOG", sx, y - 12, "#e7c49a");
     } else if (d.terr) {
-      drawTerrFeature(f, sx);
-      // Atlas kicker seated on the slope (bottom at terrain y, rotated to local slope).
-      if (f.k === "kicker" && artOk() && art.world) {
-        const fr = WORLD_FRAMES.kicker;
-        const { w: kw } = sprWu(fr);
-        // Anchor under the takeoff face so the ramp doesn't float above the pack.
-        const seatX = sx - f.dk * 0.2;
-        const seatY = gY(seatX) + 5; // embed into snow so the base reads seated
-        const slope = slopeAt(seatX);
-        contactShadow(seatX, gY(seatX) + 1, Math.min(kw * 0.48, f.ap * 0.55 + 24), 6, 0.28);
-        // Draw bottom-aligned; slope rotate keeps the base on the fall line.
-        drawAtlasFrame(cx, art.world, fr, seatX, seatY, atlasDpr(), scale, spriteG, 1, slope * 0.7);
+      if (f.k === "kicker") {
+        // Franz snow kicker v1 — sprite IS the visible jump. No white wedge / no second mound.
+        drawKickerSprite(f, sx);
+      } else {
+        drawTerrFeature(f, sx);
+        if (overviewCam) overviewTag(f.k === "flat" ? "FLAT" : "HIT", sx, gY(sx - f.dk) - f.amp * 0.35 - 20);
       }
-      if (overviewCam) overviewTag(f.k === "kicker" ? "KICKER" : f.k === "flat" ? "FLAT" : "HIT", sx, gY(sx - f.dk) - f.amp * 0.35 - 20);
     } else if (f.k === "grom" || f.k === "skier") {
       drawMob(f, sx);
     }

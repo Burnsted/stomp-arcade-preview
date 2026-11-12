@@ -19,14 +19,21 @@ export const RIDER_FRAMES = {
   crash: { x: 1207, y: 7, w: 200, h: 180 },
 } as const satisfies Record<string, AtlasFrame>;
 
-/** Cropped world atlas — only frames Terrain Park draws. */
+/** Cropped world atlas — pines + traffic. (Legacy atlas kicker crop left for BC; TP uses KICKER_FRAME.) */
 export const WORLD_FRAMES = {
   pine_tall: { x: 2, y: 0, w: 202, h: 375 },
   pine_small: { x: 206, y: 105, w: 134, h: 270 },
   patrol: { x: 2, y: 377, w: 123, h: 190 },
   skier: { x: 127, y: 377, w: 111, h: 190 },
+  /** Legacy crop — not drawn by Terrain Park after Franz snow kicker v1. */
   kicker: { x: 240, y: 377, w: 215, h: 135 },
 } as const satisfies Record<string, AtlasFrame>;
+
+/**
+ * Franz Terrain Park kicker snow v1 — complete approach+lip+landing landform.
+ * 424×135 at 2× (native÷2). Height unchanged → amp stays 67.5. Facing +X.
+ */
+export const KICKER_FRAME: AtlasFrame = { x: 0, y: 0, w: 424, h: 135 };
 
 /**
  * Franz Grom 1 (kid) — faces +X / downhill. Native÷2: ride ≈ 60 CSS px (~70% of adult).
@@ -47,6 +54,8 @@ export const RIDE_ATLAS_H = RIDER_FRAMES.ride.h;
 export const RIDE_NATIVE_CSS = RIDE_ATLAS_H / 2;
 /** Grom ride native CSS height (atlas÷2). */
 export const GROM_RIDE_NATIVE_CSS = GROM_FRAMES.grom_ride.h / 2;
+/** Kicker native CSS height (atlas÷2) — physics amp = 67.5. */
+export const KICKER_NATIVE_CSS = KICKER_FRAME.h / 2;
 
 /** Opaque resort backdrop native size (1×). */
 export const BG_W = 780;
@@ -55,6 +64,8 @@ export const BG_H = 520;
 const RIDER_SRC = "./assets/rider-atlas@2x.webp";
 const WORLD_SRC = "./assets/world-atlas@2x.webp";
 const GROM_SRC = "./assets/grom-atlas@2x.webp";
+const KICKER_SRC = "./assets/kicker@2x.webp";
+const KICKER_FALLBACK_SRC = "./assets/kicker@2x.png";
 const BG_SRC: Record<BackdropId, string> = {
   bluebird: "./assets/bg-bluebird.webp",
   night: "./assets/bg-night.webp",
@@ -66,6 +77,8 @@ export type ArtKit = {
   world: HTMLImageElement | null;
   /** Franz kid obstacle atlas (sit + ride). */
   grom: HTMLImageElement | null;
+  /** Franz TP kicker snow v1 (standalone; not world-atlas). */
+  kicker: HTMLImageElement | null;
   /** Lazy map — missing entry means not loaded yet. */
   bg: Partial<Record<BackdropId, HTMLImageElement | null>>;
   /** Average top-row sky color per backdrop (for seamless extension above cover). */
@@ -122,17 +135,20 @@ function rememberSky(kit: ArtKit, id: BackdropId, img: HTMLImageElement | null) 
 export async function loadArt(primary: BackdropId = "bluebird"): Promise<ArtKit> {
   // Primary backdrop only on first paint. Night (or the other look) loads on
   // demand via ensureBackdrop — keeps first-load under Ted's ~350 KB gzip budget.
-  const [rider, world, grom, first] = await Promise.all([
+  const [rider, world, grom, kickerWebp, first] = await Promise.all([
     loadImg(RIDER_SRC),
     loadImg(WORLD_SRC),
     loadImg(GROM_SRC),
+    loadImg(KICKER_SRC),
     loadImg(BG_SRC[primary]),
   ]);
+  const kicker = kickerWebp || await loadImg(KICKER_FALLBACK_SRC);
   const kit: ArtKit = {
     ready: !!(rider && world),
     rider,
     world,
     grom,
+    kicker,
     bg: { [primary]: first },
     bgSky: {},
   };

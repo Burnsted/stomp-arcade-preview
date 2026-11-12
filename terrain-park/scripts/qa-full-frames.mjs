@@ -209,6 +209,82 @@ await waitBg("bluebird");
 await page.waitForTimeout(80);
 await shot("qa-portrait-crash.png");
 
+// —— Franz snow kicker v1: at rest (sprite on snowY, no wedge/mound) ——
+await page.setViewportSize({ width: 390, height: 844 });
+const kickRest = await page.evaluate(() => {
+  const TP = window.TerrainPark;
+  TP.setGod(true); TP.setOverview(false); TP.debugStart(3); TP.setBackdrop("bluebird");
+  const S = TP.state();
+  S.pops = []; S.parts = []; S.grab = null;
+  // sx = wx - dist + p.x — park the jump mid-right, rider approaching from left.
+  const sxWant = 270;
+  const kick = {
+    k: "kicker", wx: S.dist + sxWant - S.p.x, w: 0, h: 0, ap: 72, dk: 16, ex: 118, amp: 67.5,
+    gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table",
+  };
+  S.feats = [kick];
+  S.p.on = true; S.p.vy = 0; S.holding = false; S.yaw = 0; S.flip = 0;
+  for (let i = 0; i < 3; i++) TP.step(1 / 60);
+  S.mode = "pause"; TP.step(0);
+  return { sx: kick.wx - S.dist + S.p.x, amp: 67.5, on: S.p.on };
+});
+await page.waitForTimeout(60);
+await shot("qa-portrait-kicker-rest.png");
+console.log("kicker rest", kickRest);
+
+// —— Mid-jump over the new kicker ——
+const kickAir = await page.evaluate(() => {
+  const TP = window.TerrainPark;
+  TP.setGod(true); TP.setOverview(false); TP.debugStart(3); TP.setBackdrop("bluebird");
+  const S = TP.state();
+  S.pops = []; S.parts = [];
+  const kick = {
+    k: "kicker", wx: S.dist + S.p.x + 50, w: 0, h: 0, ap: 72, dk: 16, ex: 118, amp: 67.5,
+    gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table",
+  };
+  S.feats = [kick];
+  S.p.on = true; S.p.vy = 0; S.holding = false; S.yaw = 0; S.flip = 0;
+  S.airBoostUsed = false;
+  for (let i = 0; i < 10; i++) TP.step(1 / 60);
+  TP.jump();
+  S.holding = true;
+  for (let i = 0; i < 12; i++) TP.step(1 / 60);
+  if (S.p.on) { S.p.on = false; S.p.y = 210; S.p.vy = -30; }
+  S.mode = "pause"; TP.step(0);
+  return { on: S.p.on, y: S.p.y, riderYFrac: TP.getView().riderYFrac };
+});
+await page.waitForTimeout(60);
+await shot("qa-portrait-kicker-air.png");
+console.log("kicker air", kickAir);
+
+// —— Clean landing with kicker still in frame ——
+const kickLand = await page.evaluate(() => {
+  const TP = window.TerrainPark;
+  TP.setGod(true); TP.setOverview(false); TP.debugStart(3); TP.setBackdrop("bluebird");
+  const S = TP.state();
+  S.pops = []; S.parts = [];
+  const kick = {
+    k: "kicker", wx: S.dist + S.p.x + 35, w: 0, h: 0, ap: 72, dk: 16, ex: 118, amp: 67.5,
+    gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table",
+  };
+  S.feats = [kick];
+  S.p.on = true; S.p.vy = 0; S.holding = false; S.yaw = 0; S.flip = 0;
+  S.airBoostUsed = false;
+  for (let i = 0; i < 6; i++) TP.step(1 / 60);
+  TP.jump();
+  for (let i = 0; i < 80; i++) {
+    TP.step(1 / 60);
+    if (S.p.on && S.p.vy === 0 && i > 15) break;
+  }
+  // Pin kicker behind the rider so the landform stays readable.
+  kick.wx = S.dist + 150 - S.p.x;
+  S.mode = "pause"; TP.step(0);
+  return { on: S.p.on, land: S.land, kickSx: kick.wx - S.dist + S.p.x, riderYFrac: TP.getView().riderYFrac };
+});
+await page.waitForTimeout(60);
+await shot("qa-portrait-kicker-land.png");
+console.log("kicker land", kickLand);
+
 // —— Grom sit on a flat runout / deck edge ——
 await page.setViewportSize({ width: 390, height: 844 });
 const sitInfo = await page.evaluate(() => {
