@@ -1,6 +1,6 @@
 /**
- * Franz STOMP arcade 3D art — cropped TP-only atlas frames at 2× DPR
- * + resort backdrop styles (bg-bluebird / bg-night).
+ * Franz STOMP arcade 3D art — cropped TP-only atlas frames at 2× DPR.
+ * Resort backdrop is procedural (see park-backdrop.ts) — no photographic plates.
  * Global sprite factor: ride CSS = RIDER_H_FRAC × height for every atlas sprite.
  */
 
@@ -47,7 +47,19 @@ export const GROM_FRAMES = {
 export type RiderFrameId = keyof typeof RIDER_FRAMES;
 export type WorldFrameId = keyof typeof WORLD_FRAMES;
 export type GromFrameId = keyof typeof GROM_FRAMES;
-export type BackdropId = "bluebird" | "night";
+/**
+ * Level setting ids (procedural park/resort). Legacy bluebird/night alias
+ * main-park / night-park for older evidence helpers.
+ */
+export type BackdropId =
+  | "bluebird"
+  | "night"
+  | "resort-base"
+  | "alpine-bowl"
+  | "dusk-glow"
+  | "night-village"
+  | "frozen-lake"
+  | "open-snowfield";
 
 /** Atlas pixel height of the ride pose (2×). Native CSS height = this / 2 = 85. */
 export const RIDE_ATLAS_H = RIDER_FRAMES.ride.h;
@@ -57,9 +69,20 @@ export const GROM_RIDE_NATIVE_CSS = GROM_FRAMES.grom_ride.h / 2;
 /** Kicker native CSS height (atlas÷2) — physics amp = 67.5. */
 export const KICKER_NATIVE_CSS = KICKER_FRAME.h / 2;
 
-/** Opaque resort backdrop native size (1×). */
-export const BG_W = 780;
-export const BG_H = 520;
+/** Per-level park/resort setting (procedural). */
+export const LEVEL_BACKDROPS: BackdropId[] = [
+  "resort-base",    // 1 park base by the lodge
+  "alpine-bowl",    // 2 main park midday
+  "frozen-lake",    // 3 pro jump line
+  "open-snowfield", // 4 rail garden flat light
+  "dusk-glow",      // 5 sunset session
+  "night-village",  // 6 night park under lights
+  "resort-base",    // 7
+  "alpine-bowl",    // 8
+  "dusk-glow",      // 9
+  "night-village",  // 10
+  "alpine-bowl",    // 11 Endless
+];
 
 const RIDER_SRC = "./assets/rider-atlas@2x.webp";
 const RIDER_RIG_SRC = "./assets/rider-rig@2x.webp";
@@ -68,10 +91,11 @@ const WORLD_SRC = "./assets/world-atlas@2x.webp";
 const GROM_SRC = "./assets/grom-atlas@2x.webp";
 const KICKER_SRC = "./assets/kicker@2x.webp";
 const KICKER_FALLBACK_SRC = "./assets/kicker@2x.png";
-const BG_SRC: Record<BackdropId, string> = {
-  bluebird: "./assets/bg-bluebird.webp",
-  night: "./assets/bg-night.webp",
-};
+
+/** Dark / warm settings that need night-style fill light on the rider. */
+export function isDarkBackdrop(id: BackdropId): boolean {
+  return id === "night" || id === "night-village" || id === "dusk-glow";
+}
 
 /** One cutout layer from Woman3 ride (atlas px + rest pose in ride-frame px). */
 export type RigPart = {
@@ -100,9 +124,9 @@ export type ArtKit = {
   grom: HTMLImageElement | null;
   /** Franz TP kicker snow v1 (standalone; not world-atlas). */
   kicker: HTMLImageElement | null;
-  /** Lazy map — missing entry means not loaded yet. */
+  /** Always null — backdrops are procedural (kept for API compatibility). */
   bg: Partial<Record<BackdropId, HTMLImageElement | null>>;
-  /** Average top-row sky color per backdrop (for seamless extension above cover). */
+  /** Sky top color per setting (from park-backdrop palette). */
   bgSky: Partial<Record<BackdropId, string>>;
 };
 
@@ -126,57 +150,18 @@ async function loadJson<T>(src: string): Promise<T | null> {
   }
 }
 
-/**
- * Skip the flat upper sky slab (~top 8%). Keep peaks + red gondola through ~62%;
- * the densest near-tree fringe is dissolved in-engine into the slope snow so
- * the mid-frame reads resort mountains, not a tree wall. Foreground: ≤1–2 pines.
- */
-/** Keep a touch more cloudy sky in the plate so the top seam isn't a hard cut. */
-export const BG_SRC_TOP = Math.round(BG_H * 0.05);
-export const BG_SRC_END = Math.round(BG_H * 0.62);
-export const BG_SRC_H = BG_SRC_END - BG_SRC_TOP;
-
-/** Sample average RGB from the backdrop content-top row — sky extension matches the art. */
-export function sampleBgSky(img: HTMLImageElement): string {
-  try {
-    const natW = img.naturalWidth || img.width || BG_W;
-    const natH = img.naturalHeight || img.height || BG_H;
-    const srcY = Math.round((BG_SRC_TOP / BG_H) * natH);
-    const w = Math.min(96, Math.max(1, natW));
-    const c = document.createElement("canvas");
-    c.width = w; c.height = 1;
-    const x = c.getContext("2d", { willReadFrequently: true });
-    if (!x) return "#6eb0e8";
-    x.drawImage(img, 0, srcY, natW, 1, 0, 0, w, 1);
-    const d = x.getImageData(0, 0, w, 1).data;
-    let r = 0, g = 0, b = 0;
-    for (let i = 0; i < w; i++) { r += d[i * 4]!; g += d[i * 4 + 1]!; b += d[i * 4 + 2]!; }
-    return `rgb(${(r / w) | 0},${(g / w) | 0},${(b / w) | 0})`;
-  } catch {
-    return "#6eb0e8";
-  }
-}
-
-function rememberSky(kit: ArtKit, id: BackdropId, img: HTMLImageElement | null) {
-  if (!img) { kit.bgSky[id] = id === "night" ? "#0c1028" : "#6eb0e8"; return; }
-  if (!kit.bgSky[id]) kit.bgSky[id] = sampleBgSky(img);
-}
-
-/** Load atlases + primary backdrop. Second backdrop loads lazily via ensureBackdrop. */
-export async function loadArt(primary: BackdropId = "bluebird"): Promise<ArtKit> {
-  // Primary backdrop only on first paint. Night (or the other look) loads on
-  // demand via ensureBackdrop — keeps first-load under Ted's ~350 KB gzip budget.
-  const [rider, rig, rigMeta, world, grom, kickerWebp, first] = await Promise.all([
+/** Load atlases only — no photographic backdrop plates on first paint. */
+export async function loadArt(_primary: BackdropId = "resort-base"): Promise<ArtKit> {
+  const [rider, rig, rigMeta, world, grom, kickerWebp] = await Promise.all([
     loadImg(RIDER_SRC),
     loadImg(RIDER_RIG_SRC),
     loadJson<RiderRigMeta>(RIDER_RIG_JSON),
     loadImg(WORLD_SRC),
     loadImg(GROM_SRC),
     loadImg(KICKER_SRC),
-    loadImg(BG_SRC[primary]),
   ]);
   const kicker = kickerWebp || await loadImg(KICKER_FALLBACK_SRC);
-  const kit: ArtKit = {
+  return {
     ready: !!((rig && rigMeta) || rider) && !!world,
     rider,
     rig: rig && rigMeta ? rig : null,
@@ -184,23 +169,16 @@ export async function loadArt(primary: BackdropId = "bluebird"): Promise<ArtKit>
     world,
     grom,
     kicker,
-    bg: { [primary]: first },
+    bg: {},
     bgSky: {},
   };
-  rememberSky(kit, primary, first);
-  return kit;
 }
 
-/** Ensure a backdrop image is loaded (idempotent). */
+/** No-op for procedural backdrops (idempotent API kept for engine callers). */
 export async function ensureBackdrop(kit: ArtKit, id: BackdropId): Promise<HTMLImageElement | null> {
-  if (kit.bg[id] !== undefined) {
-    if (kit.bg[id] && !kit.bgSky[id]) rememberSky(kit, id, kit.bg[id] ?? null);
-    return kit.bg[id] ?? null;
-  }
-  const img = await loadImg(BG_SRC[id]);
-  kit.bg[id] = img;
-  rememberSky(kit, id, img);
-  return img;
+  kit.bg[id] = null;
+  if (!kit.bgSky[id]) kit.bgSky[id] = isDarkBackdrop(id) ? "#0c1028" : "#4f96d0";
+  return null;
 }
 
 /**
