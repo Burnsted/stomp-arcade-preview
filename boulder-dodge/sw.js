@@ -1,5 +1,5 @@
-/* boulder-dodge-0.9.54-ship-qa */
-const C='boulder-dodge-0.9.54-ship-qa';
+/* boulder-dodge-0.9.57-no-mid-par */
+const C='boulder-dodge-0.9.57-no-mid-par';
 const ASSETS=['./','./index.html','./sw.js'];
 const OWN=k=>k.indexOf('boulder-dodge-')===0;
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
