@@ -32,6 +32,23 @@
     margin:0;font:800 15px/1.1 Syne,Sora,sans-serif;letter-spacing:.02em;color:#e8f2f6;
     text-shadow:0 1px 2px #000c, 0 2px 10px #000a;
   }
+  #hud .L #ver{ display:none; } /* VER/sha only on title overlay, never in-game HUD */
+  #title{
+    position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px; text-align:center;
+    background:linear-gradient(180deg, rgba(12,28,40,.82), rgba(18,36,50,.72));
+    color:#e8f2f6; pointer-events:auto;
+  }
+  #title.off{ display:none; }
+  #title h2{
+    margin:0; font:800 clamp(28px,7vw,44px)/1.05 Syne,Sora,sans-serif; letter-spacing:.02em;
+    text-shadow:0 2px 18px #000c;
+  }
+  #title #titleVer{
+    margin:0; font:700 12px/1.3 Sora,sans-serif; letter-spacing:.04em;
+    color:rgba(232,242,246,.78);
+  }
+  #title p{ margin:0; font:600 14px/1.35 Sora,sans-serif; opacity:.85; max-width:16rem; }
   #hud .L .sub, #hud .L #sub{
     margin:4px 0 0;font:800 16px/1.2 Syne,Sora,sans-serif;letter-spacing:.02em;
     color:#ffffff !important; opacity:1 !important;
@@ -111,6 +128,11 @@
     <div class="charge"><i id="chg"></i></div>
   </div>
 </div>
+<div id="title">
+  <h2>CORDUROY CLIMB</h2>
+  <div id="titleVer">VER …</div>
+  <p>Hold left to throttle · tap / hold TRICK on jumps</p>
+</div>
 <div id="toast"></div>
 <div id="throtHint">Hold left side<br>to throttle</div>
 <button type="button" id="trick" aria-label="Trick">
@@ -127,6 +149,34 @@ const AUTO=params.get('autoTest')==='1';
 const FORCE_BG=params.get('bg');
 const SHOT=params.get('shot'); // climb|pop|meter|green|landed|crash|controls|air|land|rocks
 const FORCE_TREAT=Math.max(1, Math.min(3, +(params.get('treat')||3)|0));
+/** Build id — also names the SW cache. Updated to tip sha on each playability tip. */
+const BC_VER='bc-dd9dcaf';
+const BC_SHA='dd9dcaf2a4010ef36c6a67cfa5df0c90b1b76be5';
+window.__BC_VER={ver:BC_VER, sha:BC_SHA};
+(function showVer(){
+  const el=document.getElementById('titleVer');
+  if(el) el.textContent='VER '+BC_VER+' · '+BC_SHA.slice(0,7);
+})();
+const titleEl=document.getElementById('title');
+function dismissTitle(){
+  if(titleEl) titleEl.classList.add('off');
+}
+function showTitle(){
+  if(titleEl) titleEl.classList.remove('off');
+}
+if(titleEl){
+  titleEl.addEventListener('pointerdown', ()=>{ dismissTitle(); if(window.input) input.throttle=true; }, {passive:true});
+}
+// Network-first SW + purge stale bc-* caches
+if('serviceWorker' in navigator && location.protocol.indexOf('http')===0){
+  const swUrl='sw.js?v='+encodeURIComponent(BC_VER);
+  navigator.serviceWorker.register(swUrl,{scope:'./'}).then(reg=>{ if(reg.update) reg.update(); }).catch(()=>{});
+  if(window.caches){
+    caches.keys().then(ks=>ks.forEach(k=>{
+      if(k.indexOf('bc-')===0 && k!==BC_VER) caches.delete(k);
+    }));
+  }
+}
 
 const cv=document.getElementById('cv');
 const cx=cv.getContext('2d',{willReadFrequently:true});
@@ -146,14 +196,21 @@ const BG_ALTERNATES=[]; // plates dropped from first load
 let BG_ROTATION=BG_CANDIDATES.slice();
 let BG_TREAT=FORCE_TREAT; // 1 Alto-soft · 2 HCR-chunky · 3 Place-continuous
 let levelIdx=0; // bumps each summit / wipe → next setting
-/** Seeded short/medium/long gaps — never the same gap class twice in a row. */
+/**
+ * Seeded short/medium/long gaps — never the same gap class twice in a row.
+ * First ~30s of climb uses WIDE gaps so a new player can clear 5+ jumps.
+ */
 function buildIrregularLips(){
-  const GAP={short:140, medium:210, long:300};
+  // Wide early gaps so a new player clears 5+ jumps in the opening stretch
+  const GAP_EARLY={short:230, medium:300, long:380};
+  const GAP_LATE={short:170, medium:240, long:320};
   const keys=['short','medium','long'];
   const out=[];
-  // Start after first-screen hut/rocks/truck pocket so climb props sit on flat road
-  let x=820, prev=null, i=0;
+  // First takeoff after intro hut/truck; ≥1.4s lead-in at sled@22%
+  let x=420, prev=null, i=0;
   while(x < LEVEL_LEN-160 && out.length < 12){
+    const early = out.length < 6; // opening stretch → 5+ readable jumps
+    const GAP = early ? GAP_EARLY : GAP_LATE;
     const choices=keys.filter(k=>k!==prev);
     const gk=choices[((i*17+29)|0)%choices.length];
     prev=gk;
@@ -161,7 +218,7 @@ function buildIrregularLips(){
     // Alternate small/big, force big on indices 1,3,5 so autoTest always has ≥3
     const big=(i%2)===1 || i===5;
     const w=big ? (128+(seed%4)*6) : (86+(seed%4)*6);
-    const amp=big ? (88+(seed%5)*4) : (32+(seed%4)*4);
+    const amp=big ? (88+(seed%5)*4) : (36+(seed%4)*4);
     out.push([x|0, w|0, amp|0]);
     x += w + GAP[gk] + ((seed%7)-3);
     i++;
@@ -199,28 +256,29 @@ const SETTINGS={
     sky:['#5a84a8','#9bb8d0','#e0ecf4'], snow:'#d8e6f0', shade:'#8aa0b0', tint:'#c5d6e4',
     far:['#7a90a4','#96a8b8'], midSnow:['#d8e6f0','#b0c4d4'],
     forest:['#2a4a38','#3d6a4e','#5a8a68'], fog:[220,230,240],
-    rock:['#3a4550','#4e5a66','#636e7a'], rockRim:'#9aa6b2'
+    // High-contrast rocks vs snow lane
+    rock:['#2a323c','#3a4550','#4e5a66'], rockRim:'#e8f2f8'
   },
   meadow:{
     id:'meadow', name:'Open meadow', zone:'meadow',
     sky:['#6a9ec4','#b4d2e8','#f2f7fb'], snow:'#e8f2f8', shade:'#a8c0d4', tint:'#dceaf4',
     far:['#8aa0b4','#a8bcc8'], midSnow:['#e8f2f8','#c4d6e4'],
     forest:['#355848','#4e7a60','#6a9878'], fog:[230,240,248],
-    rock:['#3a4550','#4e5a66','#636e7a'], rockRim:'#9aa6b2'
+    rock:['#2a323c','#3a4550','#4e5a66'], rockRim:'#e8f2f8'
   },
   creek:{
     id:'creek', name:'Frozen creek basin', zone:'creek',
     sky:['#4e7a9a','#8eb4cc','#d8e6f0'], snow:'#d0e0ec', shade:'#7a98ac', tint:'#b8d0e0',
     far:['#6a8498','#8498a8'], midSnow:['#d0e0ec','#a8c0d0'],
     forest:['#1e4034','#2f5e48','#457a60'], fog:[200,220,232], ice:'#8ec8e0',
-    rock:['#364048','#4a5660','#5e6a74'], rockRim:'#8a96a0'
+    rock:['#242c34','#364048','#4a5660'], rockRim:'#e0eef6'
   },
   'alpine-dusk':{
     id:'alpine-dusk', name:'High alpine at dusk', zone:'dusk', dusk:1,
     sky:['#1e2a4a','#b06858','#f0c8a0'], snow:'#f4eef2', shade:'#c4b0bc', tint:'#ebe2e8',
     far:['#3a3a52','#5a4a58'], midSnow:['#f6f0f4','#e2d0da'],
     forest:['#2e3834','#44504a','#5e6a62'], fog:[236,224,232],
-    rock:['#3e3a48','#524e5c','#686470'], rockRim:'#a098a4'
+    rock:['#2a2830','#3e3a48','#524e5c'], rockRim:'#f4eef2'
   }
 };
 let BG={ key:'trailhead', treat:BG_TREAT, plates:{}, sample:{} };
@@ -339,13 +397,22 @@ function plantPineX(seed){
 
 function buildPines(){
   const out=[];
-  // Keep clear of hut shelf (~240–320) and first-screen rock pocket (~420–560)
-  const seeds=[150, 860, 1280, 1780, 2280];
-  for(const seed of seeds){
-    let x=plantPineX(seed);
-    if(x>=220 && x<=340) x=plantPineX(150);
-    if(x>=400 && x<=560) x=plantPineX(560+40);
-    out.push({x, s:0.9+((x*13)%10)/100});
+  // e962101-level clustered near pines (lane kept clear of rocks/lips)
+  const clusters=[
+    [110,135,158,180],
+    [700,728,752,780,808],
+    [1120,1148,1175,1205,1235],
+    [1580,1610,1640,1670,1705],
+    [2050,2080,2115,2150,2185]
+  ];
+  for(const cl of clusters){
+    for(const seed of cl){
+      let x=plantPineX(seed);
+      if(x>=220 && x<=340) x=plantPineX(150);
+      if(x>=400 && x<=560) x=plantPineX(600);
+      if(out.some(p=>Math.abs(p.x-x)<24)) continue;
+      out.push({x, s:0.88+((x*13)%16)/100, cluster:1});
+    }
   }
   return out;
 }
@@ -442,6 +509,7 @@ function pointInTrick(x,y){
 }
 function syncThrottle(){
   input.throttle = input.throtPointers.size>0 || input._keyThrottle;
+  if(input.throttle) dismissTitle();
 }
 
 function onThrotDown(e){
@@ -513,12 +581,15 @@ addEventListener('keyup', e=>{
   }
 });
 
+/** One mid-screen callout slot — new replaces old (never stack CLEAN + HIT). */
 function midFlash(lab, pts, perfect){
+  scorePops.length = 0;
   scorePops.push({
     lab,
     pts: (pts==null ? null : pts),
     perfect:!!perfect,
-    t:1.45
+    t:1.15,
+    maxT:1.15
   });
 }
 function toast(msg){
@@ -634,9 +705,10 @@ function reset(){
   BG.key = resolveBgKey();
   const p={
     x:80, y:groundY(80)-2, vx:90, vy:0, ang:slopeAt(80),
-    on:true, nose:0, lives:4, charge:1,
+    on:true, nose:0, lives:4, charge:1, iframes:0,
     trick:null, trickT:0, spinAcc:0, spinTarget:0, pose:0, _hopLatch:false
   };
+  if(!(SHOT||AUTO)) showTitle(); else dismissTitle();
   S={
     t:0, p, score:0, combo:1, comboChain:0, height:0, bestHeight:0,
     boulders:[], pines:buildPines(), finished:false, crashed:false, dist:0, trickIdx:0,
@@ -646,50 +718,50 @@ function reset(){
     lean:0, bob:0, tuck:0, compress:0,
     throtGlow:0, crashPuff:0, throtHeld:0
   };
-  // Rocks: b4576e7 size/variety + drift clip; irregular short/medium/long gaps
-  const ROCK_GAP={short:160, medium:250, long:360};
-  const gapKeys=['short','medium','long'];
-  let prevSeed = null, prevGap=null, gi=0;
-  let targetX = 420;
-  while(targetX < LEVEL_LEN-180 && S.boulders.length < 14){
-    const i = S.boulders.length;
-    let seed = nextDistinctRockSeed((targetX*0.13 + i*17 + i*3)|0, prevSeed);
+  // Rocks: world-locked; clear of lip landings via pad (~100px) + land iframes (~0.45s)
+  let prevSeed = null;
+  const placeRock = (lo, hi, frac, tag)=>{
+    if(S.boulders.length >= 12 || hi - lo < 55) return false;
+    const targetX = lo + (hi - lo) * frac;
+    let seed = nextDistinctRockSeed((targetX*0.13 + tag*17 + frac*40)|0, prevSeed);
     prevSeed = seed;
-    const r = 22 + (seed%5)*3 + (i%3)*2; // e962101 hitbox ~22–36
-    const rockGap=Math.max(110, r*2.2);
-    const near = i < 2;
-    const minX = i===0 ? 400 : (S.boulders[i-1].x + rockGap);
+    const r = 24 + (seed%5)*2;
     let bx=null, best=1e9;
-    const start=Math.max(minX, targetX - (near ? 16 : 36));
-    const end=Math.min(LEVEL_LEN-160, start + (near ? 110 : 280));
-    for(let x=start; x<end; x+=4){
-      if(tooCloseToPine(x, r)) continue;
-      if(S.boulders.some(ob=>Math.abs(ob.x-x)<rockGap)) continue;
-      if(onFeatureSpan(x, 28)) continue;
-      if(rockSpansCrest(x, r) || terrainCurv(x, 18) > 1.5) continue;
+    for(let x=lo; x<=hi; x+=3){
+      if(S.boulders.some(ob=>Math.abs(ob.x-x)<100)) continue;
+      if(onFeatureSpan(x, 18)) continue;
       const s=Math.abs(slopeAt(x));
-      if(s > ROCK_SLOPE_MAX) continue;
-      // Prefer gentler seats so rocks don't read as thin wedges on hump faces
-      const score = Math.abs(x-targetX)*0.04 + Math.abs(s-0.12)*3 + (s>0.22?8:0);
+      if(s > ROCK_SLOPE_MAX * 1.15) continue;
+      const score = Math.abs(x-targetX)*0.04 + s*2;
       if(score < best){ best=score; bx=x; }
-      if(Math.abs(x-targetX) < 50 && s <= 0.22) break;
     }
-    if(bx != null){
-      S.boulders.push({x:bx, r, spin:0, hit:false, bury:0.42+(seed%6)/100, seed, home:bx});
-      if(i===0){
-        // First-screen pair: keep the second rock in the gentle pocket (~530)
-        targetX = 530;
-        prevGap = null;
-      } else {
-        const choices=gapKeys.filter(k=>k!==prevGap);
-        const gk=choices[((gi*19+7)|0)%choices.length];
-        prevGap=gk;
-        targetX = bx + ROCK_GAP[gk] + ((((gi*11)|0)%9)-4);
-        gi++;
+    if(bx == null){
+      // last resort: nearest flat-ish point in range
+      for(let x=lo; x<=hi; x+=4){
+        if(S.boulders.some(ob=>Math.abs(ob.x-x)<100)) continue;
+        if(onFeatureSpan(x, 14)) continue;
+        bx=x; break;
       }
-    } else {
-      targetX += 80;
     }
+    if(bx == null) return false;
+    S.boulders.push({x:bx, r, spin:0, hit:false, bury:0.32+(seed%5)*0.02, seed, home:bx});
+    return true;
+  };
+  if(LIPS.length) placeRock(300, LIPS[0][0] - 48, 0.55, 0);
+  for(let li=0; li<LIPS.length-1; li++){
+    const a = LIPS[li], bLip = LIPS[li+1];
+    const gap0 = a[0] + a[1] + 100;
+    const gap1 = bLip[0] - 40;
+    if(gap1 - gap0 < 60) continue;
+    if(gap1 - gap0 > 200){ placeRock(gap0, gap1, 0.35, li*2+1); placeRock(gap0, gap1, 0.75, li*2+2); }
+    else placeRock(gap0, gap1, 0.55, li*2+1);
+  }
+  if(LIPS.length){
+    const last = LIPS[LIPS.length-1];
+    const lo = last[0]+last[1]+100, hi = LEVEL_LEN-140;
+    placeRock(lo, hi, 0.30, 99);
+    placeRock(lo, hi, 0.55, 100);
+    placeRock(lo, hi, 0.80, 101);
   }
   if(throtHintEl){
     if(tipsAfterFirstRun) throtHintEl.classList.add('hide');
@@ -708,9 +780,11 @@ function resolveLanding(){
     || (S.meter.active && !S.meter.committed && (S.chainCount>0 || p.trick));
 
   p.y=groundY(p.x); p.vy=0; p.on=true; S.landFlash=0.35; S.compress=1; p._hopLatch=false;
+  p.iframes = Math.max(p.iframes||0, 0.45); // clear lip landing before rock contact
 
   if(crash){
-    if(!S._auto) p.lives--;
+    p.lives--;
+    window.__BC_LAST_HIT = {kind:'landing', msg: stillHolding?'HELD TOO LONG':'UNDER-ROTATED', t:S.t, x:p.x};
     toast(stillHolding?'HELD TOO LONG':'UNDER-ROTATED');
     p.trick=null; p.spinAcc=0; p.spinTarget=0;
     S.combo=1; S.comboChain=0; p.vx*=0.45;
@@ -753,17 +827,21 @@ function step(dt){
   S.t+=dt;
   const glowTgt = input.throttle ? 1 : 0;
   S.throtGlow += (glowTgt - S.throtGlow)*Math.min(1, 10*dt);
-  if(input.throttle) S.throtHeld = (S.throtHeld||0) + dt;
+  if(input.throttle){
+    S.throtHeld = (S.throtHeld||0) + dt;
+    dismissTitle();
+  }
   if(throtHintEl && !tipsAfterFirstRun){
     if((S.throtHeld||0) >= 3) throtHintEl.classList.add('hide');
     else throtHintEl.classList.remove('hide');
   }
   if(S.landFlash>0) S.landFlash-=dt;
+  if(p.iframes>0) p.iframes=Math.max(0, p.iframes-dt);
   if(S.crashPuff>0 && !SHOT) S.crashPuff=Math.max(0, S.crashPuff-0.55*dt);
-  for(let i=scorePops.length-1;i>=0;i--){
-    if(SHOT) break; // freeze result cards for QA shots
-    scorePops[i].t-=dt;
-    if(scorePops[i].t<=0) scorePops.splice(i,1);
+  // Single callout ages out
+  if(!SHOT && scorePops.length){
+    scorePops[0].t-=dt;
+    if(scorePops[0].t<=0) scorePops.length=0;
   }
 
   if(input.trick && performance.now()-input.trickDownAt>180){
@@ -833,14 +911,15 @@ function step(dt){
 
   for(const b of S.boulders){
     if(b.hit) continue;
-    b.x -= (140 + b.r)*dt;
-    const y=groundY(b.x), left=groundY(b.x-14), right=groundY(b.x+14);
-    if(y < left-1.5 && y < right-1.5) b.x=seatOnSlope(b.x);
-    b.spin += 2.0*dt;
-    const bury=b.bury||0.45;
+    // WORLD-LOCKED — never scroll rocks toward the sled (that made timing unreadable)
+    if(b.home != null) b.x = b.home;
+    b.spin += 0.6*dt;
+    const bury=b.bury||0.35;
     const dx=b.x-p.x, dy=(groundY(b.x)-b.r*(1-bury)) - p.y;
-    if(Math.hypot(dx,dy) < b.r*0.7+18 && p.on && !S._auto){
-      b.hit=true; p.lives--; p.vx*=0.4; toast('HIT');
+    if(Math.hypot(dx,dy) < b.r*0.7+18 && p.on && !(p.iframes>0)){
+      b.hit=true; p.lives--; p.vx*=0.4;
+      window.__BC_LAST_HIT = {kind:'rock', x:b.x, t:S.t, sledX:p.x};
+      toast('HIT');
       S.combo=1; S.comboChain=0;
     }
   }
@@ -1083,16 +1162,16 @@ function drawSlopeRockDrift(cx0, halfW, peak, sn){
   cx.fill();
   cx.restore();
 }
-/** Thin 2–4px snow cap + rim: stroke the sil crest, clipped to the body (no plank). */
+/** Bright white snow cap + rim on the crest (high contrast vs dark body). */
 function drawThinRockCap(sil, y0, h, sn, rim){
   const pts = sil.map(p=>({x:p[0], y:p[1]+y0}));
   const minY = Math.min(...pts.map(p=>p.y));
-  const capPx = Math.max(2, Math.min(4, h * 0.05)); // 2–4px at 1×
-  const rimPx = Math.max(1.15, Math.min(2.0, capPx * 0.5));
+  const capPx = Math.max(3.5, Math.min(6.5, h * 0.09)); // readable white cap
+  const rimPx = Math.max(1.4, Math.min(2.4, capPx * 0.45));
   // Only the crest band — stroke can't spill into a thick bar
   cx.save();
   cx.beginPath();
-  cx.rect(Math.min(...pts.map(p=>p.x)) - 2, minY - 1, (Math.max(...pts.map(p=>p.x)) - Math.min(...pts.map(p=>p.x))) + 4, capPx + rimPx + 2);
+  cx.rect(Math.min(...pts.map(p=>p.x)) - 2, minY - 1, (Math.max(...pts.map(p=>p.x)) - Math.min(...pts.map(p=>p.x))) + 4, capPx + rimPx + 3);
   cx.clip();
   cx.beginPath();
   for(let i=0;i<pts.length;i++){
@@ -1105,7 +1184,7 @@ function drawThinRockCap(sil, y0, h, sn, rim){
   cx.miterLimit = 2;
   cx.stroke();
   cx.strokeStyle = rim;
-  cx.globalAlpha = 0.55;
+  cx.globalAlpha = 0.7;
   cx.lineWidth = rimPx * 2;
   cx.stroke();
   cx.globalAlpha = 1;
@@ -1118,16 +1197,18 @@ function drawBoulder(b){
   const half = w * 0.5;
   const gy = groundY(b.x);
   const ang = Math.atan2(groundY(b.x + half) - groundY(b.x - half), half * 2);
-  const cols = look.rock || ['#3a4550','#4e5a66','#636e7a'];
-  const rim = look.rockRim || '#9aa6b2';
-  const sn = look.snow || '#d8e6f0';
-  // b4576e7 size kept; slightly shallower bury + lighter drift so body isn't a sliver
-  const buryFrac = 0.32 + (seed % 5) * 0.02; // 0.32–0.40 visible body
+  // High-contrast lane rocks: dark body, bright white cap, seated ~30% with drift lip
+  const cols = look.rock || ['#1e2830','#2c3844','#3a4652'];
+  const rim = look.rockRim || '#c8d4de';
+  const sn = '#f4f8fb';
+  // ~30% buried into the terrain line — no detached oval under the snow
+  const buryFrac = 0.30 + (seed % 5) * 0.012; // 0.30–0.348
   const y0 = -h * 0.12;
   const bodyTop = -h * 0.60;
   const cutY = bodyTop + h * 0.60 * (1 - buryFrac);
-  const peak = Math.max(4, -cutY * 0.48);
-  const driftHalf = half * 1.08;
+  // Drift lip must reach the seat cut so white snow never gaps under the rock
+  const peak = Math.max(7, -cutY * 1.08);
+  const driftHalf = half * 1.18;
 
   // World clip: nothing of the rock may paint below the slope/drift snow line
   cx.save();
@@ -1176,10 +1257,17 @@ function drawBoulder(b){
   drawThinRockCap(sil, y0, h, sn, rim);
   cx.restore();
 
+  // Contact shadow hugging the bury cut — clipped so only a thin band at the rock base shows
+  cx.fillStyle = 'rgba(8,14,22,0.42)';
+  cx.beginPath();
+  cx.ellipse(1, cutY - 0.5, half * 0.80, 2.2, 0.02, 0, Math.PI * 2);
+  cx.fill();
+
   cx.restore(); // seat clip
   cx.restore(); // local xform
   cx.restore(); // drift clip
 
+  // Snow drift lip wrapping the buried base — covers seat cut, no white gap under rock
   drawSlopeRockDrift(b.x, driftHalf, peak, sn);
 
   if(!window.__BC_ROCK_BBOX) window.__BC_ROCK_BBOX = [];
@@ -1576,25 +1664,21 @@ function drawTruck(x, y, sc){
 }
 
 /**
- * Backdrop: far ridge/sky essentially static (no vertical drift);
- * at most ONE distant forest band at one clear parallax rate;
- * climb-side trees/hut/truck/fence are world-locked (drawn in drawWorldLandmarks).
- * No layer uses the sled's y. No tree sway.
+ * Backdrop — calm play lane:
+ *  far ridge/sky static (≤0.02×); soft snow wash only (no trees in screen space).
+ *  All trees / snow decals are world-locked at 1.0× via drawWorldScenery().
  */
 function drawBackdrop(camX, terrainScreenY){
   const look = settingLook(BG.key);
   const zone = look.zone || look.id;
-  // meetY from terrain ground screen Y only — never sled y
   const meetY = Math.max(H*0.50, Math.min(H*0.78, terrainScreenY!=null ? terrainScreenY : H*0.62));
   const landscape = W > H;
-  const farP=0.02;          // far ridge/sky essentially static
-  const midP=0.10;          // single distant forest band — one clear rate
-  const nearP=1.0;          // near climb props are world-locked (documented rate)
+  const farP=0.02;
+  const midP=0.0;           // no mid parallax forest in screen space
+  const nearP=1.0;
   const snow = look.snow || '#d8e6f0';
-  const forest = look.forest || ['#2a4a38','#3d6a4e','#5a8a68'];
   const ms = look.midSnow || [snow, look.shade || '#a8c0d4'];
 
-  // Sky (static — no cam coupling beyond meetY from terrain)
   const sky = look.sky;
   const ug = cx.createLinearGradient(0, 0, 0, meetY);
   if(look.dusk){
@@ -1610,81 +1694,32 @@ function drawBackdrop(camX, terrainScreenY){
     cx.beginPath(); cx.arc(W*0.78, H*0.12, 13, 0, Math.PI*2); cx.fill();
   }
 
-  // FAR mountain face — essentially static (tiny scroll, no vertical drift)
+  // FAR mountain face — essentially static (≤0.02×)
   const farScroll = camX * farP;
   const farTop = H * (landscape ? 0.14 : 0.18);
   fillBand(-40, W+80, (x)=>ridgeY(x+farScroll, farTop, landscape?22:28, 1.1), meetY, look.far[0]);
   fillBand(-40, W+80, (x)=>ridgeY(x+farScroll, farTop+14, landscape?14:18, 2.3), meetY, look.far[1]);
   const haze1 = cx.createLinearGradient(0, farTop, 0, meetY*0.55);
-  haze1.addColorStop(0, rgba(look.fog||[220,230,240], 0.22));
-  haze1.addColorStop(0.55, rgba(look.fog||[220,230,240], 0.10));
+  haze1.addColorStop(0, rgba(look.fog||[220,230,240], 0.18));
+  haze1.addColorStop(0.55, rgba(look.fog||[220,230,240], 0.08));
   haze1.addColorStop(1, rgba(look.fog||[220,230,240], 0));
   cx.fillStyle = haze1; cx.fillRect(0, farTop-8, W, meetY*0.45);
 
-  // ONE distant forest band at midP — snow face + clump forest + trail cuts (+ creek)
-  const midScroll = (camX * midP) % 2200;
-  const x0 = -midScroll - 80;
-  const span = W + 2400;
-  const faceTop = meetY - (landscape ? 148 : 178);
-  const faceBot = meetY + 6;
-  fillBand(x0, span, (x)=>ridgeY(x+midScroll, faceTop, 28, 0.8), faceBot, ms[1]);
-  fillBand(x0, span, (x)=>ridgeY(x+midScroll, faceTop+16, 18, 1.9), faceBot, ms[0]);
+  // Soft mid face — slightly cooler so the play-lane snow hill reads in front
+  const faceTop = meetY - (landscape ? 110 : 130);
+  const faceBot = meetY + 4;
+  fillBand(-40, W+80, (x)=>ridgeY(x+farScroll*0.5, faceTop, 18, 0.8), faceBot, ms[1]);
+  fillBand(-40, W+80, (x)=>ridgeY(x+farScroll*0.5, faceTop+12, 12, 1.9), faceBot, ms[0]);
   const face = cx.createLinearGradient(0, faceTop, 0, faceBot);
-  face.addColorStop(0,'rgba(255,255,255,.18)'); face.addColorStop(0.3,'rgba(255,255,255,.05)');
-  face.addColorStop(0.7,'rgba(50,80,110,.10)'); face.addColorStop(1,'rgba(50,80,110,.18)');
-  cx.fillStyle = face; cx.fillRect(x0, faceTop-8, span, faceBot-faceTop+16);
+  face.addColorStop(0,'rgba(255,255,255,.10)'); face.addColorStop(0.4,'rgba(180,200,220,.06)');
+  face.addColorStop(1,'rgba(50,80,110,.14)');
+  cx.fillStyle = face; cx.fillRect(-40, faceTop-8, W+80, faceBot-faceTop+16);
 
-  const dens = 2;
-  const forestBot = faceBot - (zone==='creek' ? 40 : zone==='meadow' ? 8 : 4);
-  const trailN = zone==='meadow' ? 1 : (zone==='creek' ? 0 : 2);
-  const faceH = forestBot - (faceTop+2);
-  const treeTop = faceTop+2 + faceH*0.12;
-  const trails = buildTrails(x0 + (zone==='creek'?380:0), treeTop, forestBot, zone, trailN);
-  for(let tr=0; tr<trails.length; tr++) drawTrailCut(trails[tr], zone==='meadow'?5.5:5, ms[0], look.shade||'#8aa0b0');
-  drawDenseForest(x0, span, faceTop+2, forestBot, forest, look.tint||snow, trails, dens);
-
-  const atmo = cx.createLinearGradient(0, faceTop-14, 0, faceTop+36);
-  atmo.addColorStop(0, rgba(look.fog||[220,230,240], 0.28));
-  atmo.addColorStop(1, rgba(look.fog||[220,230,240], 0));
-  cx.fillStyle = atmo; cx.fillRect(x0, faceTop-16, span, 42);
-
-  if(zone==='creek'){
-    const cy = meetY - 24;
-    const ice = look.ice || '#b0d4e4';
-    const creekY = (x)=> cy + Math.sin((x+midScroll)*0.014)*4.5 + Math.sin((x+midScroll)*0.033)*2.5;
-    cx.fillStyle = rgba(hexRgb(snow), 0.7);
-    cx.beginPath(); cx.moveTo(-20, cy+14);
-    for(let x=-20;x<=W+20;x+=18) cx.lineTo(x, creekY(x)-6);
-    for(let x=W+20;x>=-20;x-=18) cx.lineTo(x, creekY(x)-11);
-    cx.closePath(); cx.fill();
-    cx.beginPath(); cx.moveTo(-20, cy+16);
-    for(let x=-20;x<=W+20;x+=18) cx.lineTo(x, creekY(x)+6);
-    for(let x=W+20;x>=-20;x-=18) cx.lineTo(x, creekY(x)+11);
-    cx.closePath(); cx.fill();
-    cx.beginPath();
-    for(let x=-20;x<=W+20;x+=14){
-      const y=creekY(x), half=3.2+Math.sin((x+midScroll)*0.021)*0.8;
-      if(x===-20) cx.moveTo(x,y-half); else cx.lineTo(x,y-half);
-    }
-    for(let x=W+20;x>=-20;x-=14){
-      const y=creekY(x), half=3.2+Math.sin((x+midScroll)*0.021)*0.8;
-      cx.lineTo(x,y+half);
-    }
-    cx.closePath(); cx.fillStyle = ice; cx.fill();
-    cx.strokeStyle = 'rgba(255,255,255,0.40)'; cx.lineWidth = 0.7;
-    for(let c=0;c<6;c++){
-      const cx0 = 80 + c*130 + hash01(c)*30;
-      const cy0 = creekY(cx0);
-      cx.beginPath(); cx.moveTo(cx0-2, cy0); cx.lineTo(cx0+8+hash01(c*2)*6, cy0+(hash01(c*7)-0.5)*2.5); cx.stroke();
-    }
-  }
-
-  // Soft snow veil into the playfield (no near parallax trees — those are world-locked)
-  const veilTop = meetY - (landscape ? H*0.08 : H*0.10);
+  // Light join veil only — avoid washing the scene into pale fog
+  const veilTop = meetY - (landscape ? H*0.04 : H*0.05);
   const veil = cx.createLinearGradient(0, veilTop, 0, meetY + 2);
   veil.addColorStop(0, rgba(hexRgb(snow), 0));
-  veil.addColorStop(0.55, rgba(hexRgb(snow), 0.14));
-  veil.addColorStop(1, rgba(hexRgb(snow), 0.40));
+  veil.addColorStop(1, rgba(hexRgb(snow), 0.12));
   cx.fillStyle = veil;
   cx.fillRect(0, veilTop, W, meetY + 2 - veilTop);
 
@@ -1692,10 +1727,106 @@ function drawBackdrop(camX, terrainScreenY){
     window.__BC_PLATE = {
       meetY, landscape, key: look.id, name: look.name, zone,
       farP, midP, nearP, platesDropped: true, veilTop, bdPort: 'b311c69',
-      worldLockedNear: true, forestBands: 1
+      worldLockedNear: true, forestBands: 0, paleTreeline: true,
+      sceneryWorldLock: true
     };
   }
 }
+
+/**
+ * World-locked backcountry scenery at 1.0× (sx = wx − camX via the active translate).
+ * Medium-density clustered pines + snow decals — lighter so rocks stay readable.
+ * Never drawn in screen-space backdrop (that glued trees to the camera).
+ */
+function drawWorldScenery(camX){
+  const look = settingLook(BG.key);
+  const pale = look.dusk
+    ? ['#4e5248','#5e6458','#6e7468']
+    : ['#2a4a38','#3d6a4e','#4e7a5a'];
+  const midTone = look.forest || (look.dusk
+    ? ['#2e3834','#44504a','#5e6a62']
+    : ['#2a4a38','#3d6a4e','#5a8a68']);
+  const sn = look.tint || look.snow || '#d8e6f0';
+  const x0 = camX - 60, x1 = camX + W + 60;
+  const probes = {trees:[], decals:[], rocks:[]};
+
+  // Mid-slope pine clusters at 1.0× — e962101 density, mid contrast (not washed-out fog)
+  const midStep = 36;
+  let midN = 0;
+  for(let wx = Math.floor(x0/midStep)*midStep; wx <= x1; wx += midStep){
+    if(hash01(wx*0.13) < 0.22) continue;
+    if(onFeatureSpan(wx, 16)) continue;
+    const gy = groundY(wx);
+    const up = 36 + hash01(wx*0.41)*58;
+    const baseY = gy - up;
+    const clump = 3 + ((hash01(wx*0.07)*3)|0); // 3–5 per cluster
+    for(let k=0;k<clump;k++){
+      const ox = wx + (k-2)*10 + (hash01(wx+k*3)-0.5)*8;
+      if(ox < x0 || ox > x1) continue;
+      const h = 28 + hash01(ox*0.29)*26;
+      const tone = midTone[(hash01(ox*0.11)*3)|0];
+      cx.globalAlpha = 0.78;
+      drawConifer(ox, baseY + hash01(ox)*4, h, tone, sn, 1);
+      cx.globalAlpha = 1;
+      if(k===0 && midN < 10) probes.trees.push({wx:ox, wy:baseY, kind:'mid'});
+      midN++;
+    }
+  }
+
+  // Near-trail accents between clusters (keep lane clear of rocks)
+  const nearStep = 48;
+  for(let wx = Math.floor(x0/nearStep)*nearStep; wx <= x1; wx += nearStep){
+    if(hash01(wx*0.19) < 0.38) continue;
+    if(onFeatureSpan(wx, 22)) continue;
+    if((S.boulders||[]).some(b=>!b.hit && Math.abs(b.x-wx)<70)) continue;
+    const gy = groundY(wx);
+    const h = 22 + hash01(wx*0.33)*16;
+    cx.globalAlpha = 0.72;
+    drawConifer(wx + hash01(wx)*6, gy - 1, h, pale[(hash01(wx)*3)|0], sn, 1);
+    cx.globalAlpha = 1;
+  }
+
+  // Creek ribbon in WORLD space (was screen-glued in backdrop)
+  if((look.zone||look.id)==='creek'){
+    const ice = look.ice || '#b0d4e4';
+    const snowCol = look.snow || '#d8e6f0';
+    for(let wx = x0; wx < x1; wx += 16){
+      const gy = groundY(wx) - 18;
+      const y = gy + Math.sin(wx*0.014)*3.5 + Math.sin(wx*0.033)*2.0;
+      cx.fillStyle = rgba(hexRgb(snowCol), 0.4);
+      cx.fillRect(wx, y-8, 18, 6);
+      cx.fillStyle = ice;
+      cx.fillRect(wx, y-3, 18, 5);
+    }
+  }
+
+  window.__BC_PALETREES = midN;
+  window.__BC_SCENERY_PROBE = probes;
+}
+
+/** Ground snow decals at 1.0× — drawn after the snow band so texture survives. */
+function drawWorldSnowDecals(camX){
+  const x0 = camX - 60, x1 = camX + W + 60;
+  const probes = (window.__BC_SCENERY_PROBE = window.__BC_SCENERY_PROBE || {trees:[], decals:[], rocks:[]});
+  probes.decals = [];
+  const decalStep = 46;
+  for(let wx = Math.floor(x0/decalStep)*decalStep; wx <= x1; wx += decalStep){
+    if(hash01(wx*0.23) < 0.22) continue;
+    const gy = groundY(wx);
+    const ox = wx + (hash01(wx*0.5)-0.5)*10;
+    const w = 10 + hash01(wx*0.7)*14;
+    cx.fillStyle = 'rgba(255,255,255,0.55)';
+    cx.beginPath();
+    cx.ellipse(ox, gy - 1.5, w, 3.2 + hash01(wx)*1.5, (hash01(wx*1.1)-0.5)*0.25, 0, Math.PI*2);
+    cx.fill();
+    cx.fillStyle = 'rgba(70,100,120,0.32)';
+    cx.beginPath();
+    cx.ellipse(ox + w*0.35, gy + 0.5, 3.4, 1.7, 0.1, 0, Math.PI*2);
+    cx.fill();
+    if(probes.decals.length < 10) probes.decals.push({wx:ox, wy:gy, kind:'decal'});
+  }
+}
+function drawPaleTreeline(camX){ drawWorldScenery(camX); }
 
 /**
  * Pick a seat for a cut shelf: off lips, clear of avoid, first-screen preferred.
@@ -1789,23 +1920,17 @@ function planLandmarkShelves(camX){
   }
 
   if(zone==='trailhead'){
-    planHut(260, 1.05, null, {xMin:220, xMax:360});
-    const avoid=[...rockAvoidTruck, ...pineAvoid, ...(plan.hut ? [{x:plan.hut.cx, r:120}] : [])];
-    // Flat road between rocks and first lip (~720)
-    const twx=findFlatShelf(640, 40, avoid, {xMin:580, xMax:780});
-    const sc=1.35, tcx=twx + 30*sc;
-    // Final clearance: truck shelf must not overlap a rock
-    const truckClear = !rocks.some(b=>Math.abs(tcx - b.x) < Math.max(90, (b.r||24)*2.5 + 20));
-    if(truckClear && twx < 800){
-      const ty0=groundY(tcx);
-      // Wide road pad covers truck + TRAIL sign
-      const tgy=cutTracked(tcx, 70, ty0);
-      plan.truck={x:twx, cx:tcx, gy:tgy, sc};
-      // Sign on the same cut shelf; prefer past the bed, else behind cab if lip ahead
-      let sx=tcx + Math.round(36*sc);
-      if(onFeatureSpan(sx, 22) || sx > 800) sx=tcx - Math.round(28*sc);
-      plan.sign={x:sx, gy:tgy};
-    }
+    planHut(250, 1.05, null, {xMin:220, xMax:340});
+    const avoid=[...rockAvoidTruck, ...pineAvoid, ...(plan.hut ? [{x:plan.hut.cx, r:110}] : [])];
+    // Truck on flat road BETWEEN hut and first lip (~420) — force a pad if needed
+    let twx=findFlatShelf(300, 32, avoid, {xMin:260, xMax:380});
+    if(twx > 380 || onFeatureSpan(twx, 30)) twx = 290;
+    const sc=1.25, tcx=twx + 28*sc;
+    const ty0=groundY(tcx);
+    const tgy=cutTracked(tcx, 55, ty0);
+    plan.truck={x:twx, cx:tcx, gy:tgy, sc};
+    const sx=Math.min(tcx + Math.round(30*sc), 395);
+    plan.sign={x:sx, gy:tgy};
   }
   if(zone==='meadow'){
     for(let sx=158; sx<=980; sx+=72){
@@ -1889,28 +2014,31 @@ function drawWorldLandmarks(camX){
 }
 
 function computeCam(p){
-  const focusX=W*0.42;
+  // Sled fixed ~22% from left → ~78% of the view is ahead of the rider
+  const focusX=W*0.22;
   const camX=p.x-focusX;
-  const gy=groundY(p.x);
+  // Heavily smoothed terrain baseline (look-ahead) — never tracks sled y / air / bob
+  const gyRaw=groundY(p.x)*0.45 + groundY(p.x+90)*0.30 + groundY(p.x+180)*0.25;
   const landscape = W > H;
-  // Vertical cam locks to TERRAIN only — never follows sled y (no jump vertical drift)
   const gFrac = landscape ? 0.70 : 0.66;
-  let targetCamY = gy - H*gFrac;
+  let targetCamY = gyRaw - H*gFrac;
 
   const gMin = landscape ? H*0.64 : H*0.58;
   const gMax = landscape ? H*0.78 : H*0.74;
-  let gScreen=gy - targetCamY;
-  if(gScreen > gMax) targetCamY = gy - gMax;
-  if(gScreen < gMin) targetCamY = gy - gMin;
+  let gScreen=gyRaw - targetCamY;
+  if(gScreen > gMax) targetCamY = gyRaw - gMax;
+  if(gScreen < gMin) targetCamY = gyRaw - gMin;
 
-  gScreen=gy - targetCamY;
-  if(gScreen > H*0.82) targetCamY = gy - H*0.82;
+  gScreen=gyRaw - targetCamY;
+  if(gScreen > H*0.82) targetCamY = gyRaw - H*0.82;
   const gFloor = landscape ? H*0.58 : H*0.50;
-  if(gScreen < gFloor) targetCamY = gy - gFloor;
+  if(gScreen < gFloor) targetCamY = gyRaw - gFloor;
 
   if(camSmoothY==null) camSmoothY=targetCamY;
-  camSmoothY += (targetCamY - camSmoothY) * (SHOT ? 1 : 0.2);
-  lastCam={x:camX, y:camSmoothY, groundScreenY: gy-camSmoothY, sledScreenY:p.y-camSmoothY};
+  // Heavy smooth — no bob, no air tracking
+  camSmoothY += (targetCamY - camSmoothY) * (SHOT ? 1 : 0.055);
+  const gyNow=groundY(p.x);
+  lastCam={x:camX, y:camSmoothY, groundScreenY: gyNow-camSmoothY, sledScreenY:p.y-camSmoothY, focusX};
   return lastCam;
 }
 
@@ -1932,6 +2060,25 @@ function drawSnowLipShades(camX, camY){
     cx.closePath();
     cx.fillStyle='rgba(255,255,255,.07)';
     cx.fill();
+  }
+}
+
+/** Subtle jump takeoff marks on the snow face (not floating over fog). */
+function drawJumpTakeoffMarks(camX){
+  for(const [cx0,w,amp] of LIPS){
+    const take = cx0 + w * 0.18;
+    if(take < camX-20 || take > camX+W+20) continue;
+    const gy = groundY(take);
+    const big = amp >= BIG_AIR_AMP;
+    cx.strokeStyle = big ? 'rgba(240,180,41,0.45)' : 'rgba(255,255,255,0.38)';
+    cx.lineWidth = big ? 2.2 : 1.7;
+    cx.lineCap = 'round';
+    cx.lineJoin = 'round';
+    cx.beginPath();
+    cx.moveTo(take - 7, gy - 1);
+    cx.lineTo(take + 1, gy - 8);
+    cx.lineTo(take + 9, gy - 1);
+    cx.stroke();
   }
 }
 
@@ -1959,38 +2106,63 @@ function draw(){
   cx.translate(-camX, -camY);
 
   const x0=camX-40, x1=camX+W+40;
+  // World-locked mid pines BEHIND snow (sx = wx − camX via translate)
+  drawWorldScenery(camX);
+
+  // Filled snow hill mass (e962101): lit crest + shaded body — not a thin ribbon
+  const lookSnow=settingLook(BG.key);
+  const sn0=lookSnow.snow||'#e8f0f6';
+  const sn1=lookSnow.tint||'#c5d6e6';
+  const sn2=lookSnow.shade||'#8aa3b8';
   cx.beginPath();
   cx.moveTo(x0, camY+H+280);
   cx.lineTo(x0, groundY(x0));
   for(let x=x0;x<=x1;x+=5) cx.lineTo(x, groundY(x));
   cx.lineTo(x1, camY+H+280);
   cx.closePath();
-  const lookSnow=settingLook(BG.key);
-  const sn0=lookSnow.snow||'#d8e6f0';
-  const sn1=lookSnow.tint||'#b9cce0';
-  const sn2=lookSnow.shade||'#9eb6cc';
-  const snowBody=cx.createLinearGradient(0, cam.groundScreenY + camY - 4, 0, camY+H);
-  snowBody.addColorStop(0, sn0);
-  snowBody.addColorStop(0.55, sn1);
+  const gyWorld = cam.groundScreenY + camY;
+  const snowBody=cx.createLinearGradient(0, gyWorld - 2, 0, gyWorld + H*0.55);
+  snowBody.addColorStop(0, '#f4f8fb');
+  snowBody.addColorStop(0.12, sn0);
+  snowBody.addColorStop(0.45, sn1);
   snowBody.addColorStop(1, sn2);
   cx.fillStyle=snowBody;
   cx.fill();
 
+  // Near-crest bevel (filled, not a floating stroke) so the top edge reads as snow pack
+  cx.beginPath();
+  for(let x=x0;x<=x1;x+=5){
+    const y=groundY(x);
+    if(x===x0) cx.moveTo(x,y-1.5); else cx.lineTo(x,y-1.5);
+  }
+  for(let x=x1;x>=x0;x-=5) cx.lineTo(x, groundY(x)+18);
+  cx.closePath();
+  const crest=cx.createLinearGradient(0, gyWorld-2, 0, gyWorld+20);
+  crest.addColorStop(0, 'rgba(255,255,255,0.55)');
+  crest.addColorStop(0.45, 'rgba(255,255,255,0.18)');
+  crest.addColorStop(1, 'rgba(90,120,150,0.16)');
+  cx.fillStyle=crest;
+  cx.fill();
+
+  // Thin lit rim on the crest
   cx.beginPath();
   for(let x=x0;x<=x1;x+=5){
     const y=groundY(x);
     if(x===x0) cx.moveTo(x,y); else cx.lineTo(x,y);
   }
-  cx.strokeStyle='rgba(255,255,255,.26)';
-  cx.lineWidth=2.2;
+  cx.strokeStyle='rgba(255,255,255,.50)';
+  cx.lineWidth=2.0;
   cx.lineCap='round';
   cx.lineJoin='round';
   cx.stroke();
 
+  drawWorldSnowDecals(camX);
   drawSnowLipShades(camX, camY);
+  drawJumpTakeoffMarks(camX);
 
   const lookPlace=settingLook(BG.key);
-  const pineCap=2;
+  // Near pine clusters (e962101 density) — mid contrast, lane kept clear of rocks
+  const pineCap=8;
   let pinesDrawn=0;
   const lookPine=lookPlace;
   const fcols=lookPine.forest||['#2a4a38','#3d6a4e','#5a8a68'];
@@ -1998,10 +2170,10 @@ function draw(){
   for(const pn of S.pines){
     if(pn.x<camX-40 || pn.x>camX+W+40) continue;
     if(pinesDrawn>=pineCap) break;
+    if((S.boulders||[]).some(b=>!b.hit && Math.abs(b.x-pn.x)<55)) continue;
     const gy=groundY(pn.x);
-    const th=48*(pn.s||0.95);
-    // Seat on terrain with snow mound + contact shadow (not pasted)
-    cx.fillStyle='rgba(35,50,65,0.28)';
+    const th=40*(pn.s||0.95);
+    cx.fillStyle='rgba(35,50,65,0.22)';
     cx.beginPath(); cx.ellipse(pn.x+3, gy+4, th*0.28, 4.2, 0.05, 0, Math.PI*2); cx.fill();
     cx.fillStyle=pineSnow;
     cx.beginPath(); cx.ellipse(pn.x, gy+1.5, th*0.34, 6.0, 0, 0, Math.PI*2); cx.fill();
@@ -2012,6 +2184,11 @@ function draw(){
     .filter(pn=>pn.x>=camX-40 && pn.x<=camX+W+40)
     .slice(0, pineCap)
     .map(pn=>({x:pn.x, baseY:groundY(pn.x), screenX:pn.x-camX, onFeature:onFeatureSpan(pn.x)}));
+  if(window.__BC_SCENERY_PROBE){
+    for(const pn of window.__BC_PINES_VISIBLE.slice(0,4)){
+      window.__BC_SCENERY_PROBE.trees.push({wx:pn.x, wy:pn.baseY, kind:'near'});
+    }
+  }
 
   window.__BC_ROCK_BBOX = [];
   for(const b of S.boulders){
@@ -2218,8 +2395,13 @@ function drawScorePops(){
   if(sledY < baseY + labSize) baseY = Math.min(band.y1, Math.max(band.y0, sledY - labSize - 8));
 
   let cardBottom = baseY;
-  for(const sp of scorePops){
-    const a=Math.min(1, sp.t*1.5);
+  // Exactly one callout — fade in/out via remaining t
+  const sp = scorePops[0];
+  if(sp){
+    const maxT = sp.maxT || 1.15;
+    const fadeIn = Math.min(1, (maxT - sp.t) / 0.12);
+    const fadeOut = Math.min(1, sp.t / 0.22);
+    const a = Math.min(fadeIn, fadeOut);
     cx.save();
     cx.globalAlpha=a;
     cx.textAlign='center';
@@ -2614,8 +2796,8 @@ function applyShotFreeze(){
     if(cSafe==null) cSafe=aX+pairGap;
     const seedA = 14, seedB = nextDistinctRockSeed(53, seedA);
     S.boulders = [
-      {x:aX, r:rA, bury:0.45, hit:false, seed:seedA},
-      {x:cSafe, r:rC, bury:0.44, hit:false, seed:seedB}
+      {x:aX, r:rA, bury:0.34, hit:false, seed:seedA, home:aX},
+      {x:cSafe, r:rC, bury:0.34, hit:false, seed:seedB, home:cSafe}
     ];
     const mid=(aX+cSafe)/2;
     // Sled near first rock for landscape QA
@@ -2656,6 +2838,179 @@ function applyShotFreeze(){
   };
 }
 
+/**
+ * Auto-bot: hold throttle; press trick 0.6s before nearest lip/rock contact.
+ * Writes __BC_PLAYBOT with obstaclesCleared (lips jumped + rocks passed).
+ */
+async function runPlayBot(opts){
+  opts = opts || {};
+  const maxT = opts.maxT || 45;
+  const pressLead = opts.pressLead != null ? opts.pressLead : 0.6;
+  reset();
+  dismissTitle();
+  // Real damage — no _auto immunity. Bot must clear hazards cleanly.
+  S._auto = false;
+  input.throttle = true;
+  const startLives = S.p.lives;
+  const hitLog = [];
+  let clearedLips = 0, clearedRocks = 0, seenLip = {}, seenRock = {};
+  let maxX = 0;
+  const dt = 1/60;
+  const steps = Math.ceil(maxT / dt);
+  for(let i=0;i<steps && S && !S.finished;i++){
+    const p = S.p;
+    maxX = Math.max(maxX, p.x);
+    for(const L of LIPS){
+      const end = L[0] + L[1];
+      if(!seenLip[L[0]] && p.x > end + 10){
+        seenLip[L[0]] = 1; clearedLips++;
+      }
+    }
+    for(const b of S.boulders){
+      const id = b.home != null ? b.home : b.x;
+      if(!seenRock[id] && p.x > b.x + 24 && !b.hit){
+        seenRock[id] = 1; clearedRocks++;
+      }
+    }
+    let bestT = 1e9, kind = null;
+    for(const L of LIPS){
+      const take = L[0] + L[1]*0.45;
+      const dx = take - p.x;
+      if(dx < 8) continue;
+      const t = dx / Math.max(60, p.vx);
+      if(t < bestT){ bestT = t; kind = 'lip'; }
+    }
+    for(const b of S.boulders){
+      if(b.hit) continue;
+      const dx = b.x - p.x;
+      if(dx < 8) continue;
+      const t = dx / Math.max(60, p.vx);
+      if(t < bestT){ bestT = t; kind = 'rock'; }
+    }
+    const lead = kind === 'rock' ? 0.55 : pressLead;
+    if(p.on && bestT <= lead && bestT > 0.08){
+      input.trick = true;
+      input.trickDownAt = performance.now();
+      input.trickWasHold = false; // tap hop — avoid HELD TOO LONG
+    } else if(p.on){
+      input.trick = false;
+    }
+    // In air: never hold the meter; commit clean / release before landing
+    if(!p.on){
+      input.trick = false;
+      if(S.meter && S.meter.active){
+        S.meter.holding = false;
+        if(!S.meter.committed){ S.meter.committed = true; S.meter.stick = 'clean'; }
+      }
+    }
+    const livesBefore = p.lives;
+    step(dt);
+    if(p.lives < livesBefore && window.__BC_LAST_HIT){
+      hitLog.push(Object.assign({}, window.__BC_LAST_HIT));
+    }
+    if(i % 2 === 0){ computeCam(p); draw(); }
+    if(S.t >= 30 && opts.stopAt30) break;
+  }
+  const obstaclesCleared = clearedLips + clearedRocks;
+  const livesLost = startLives - (S && S.p ? S.p.lives : 0);
+  const report = {
+    ok: obstaclesCleared >= 10 && (S ? S.jumpsLanded : 0) >= 5 && livesLost === 0,
+    clearedLips, clearedRocks, obstaclesCleared,
+    jumpsLanded: S ? S.jumpsLanded : 0,
+    lives: S && S.p ? S.p.lives : 0,
+    livesLost, startLives, hits: hitLog,
+    x: maxX, finished: !!(S && S.finished), pressLead, ver: BC_VER,
+    nLips: LIPS.length, nRocks: (S && S.boulders) ? S.boulders.length : 0,
+    t: S ? S.t : 0
+  };
+  window.__BC_PLAYBOT = report;
+  return report;
+}
+window.runPlayBot = runPlayBot;
+
+/** Lead-in harness: every on-screen hazard had ≥1.4s from right-edge entry to contact. */
+function assertHazardLeadIn(){
+  const focus = 0.22;
+  const ahead = W * (1 - focus);
+  const vx = 180; // nominal throttle cruise for the check
+  const minLead = 1.4;
+  const need = ahead / vx; // seconds of view at cruise
+  const bad = [];
+  for(const b of (S && S.boulders) || []){
+    if(b.x < 200) continue;
+    const lead = (b.x - 80) / vx; // from spawn start
+    if(lead < minLead) bad.push({kind:'rock', x:b.x|0, lead:+lead.toFixed(2)});
+  }
+  for(const L of LIPS){
+    const take = L[0] + L[1]*0.18;
+    const lead = (take - 80) / vx;
+    if(take < LEVEL_LEN - 100 && lead < minLead) bad.push({kind:'lip', x:take|0, lead:+lead.toFixed(2)});
+  }
+  const report = {ok: bad.length===0 && need >= minLead - 0.05, needSec:+need.toFixed(2), minLead, bad, focus, aheadPx:ahead|0};
+  window.__BC_LEADIN = report;
+  return report;
+}
+window.assertHazardLeadIn = assertHazardLeadIn;
+
+/**
+ * Scenery must be drawn at sx = wx − camX (1.0×), matching rocks.
+ * Advances exactly 0.2s via step() (no RAF) and compares Δscreen to −ΔcamX (±10%).
+ */
+function assertSceneryWorldLock(){
+  // Seat mid-run with hazards ahead so trees/decals/rocks are all in view
+  const saved = {x:S.p.x, y:S.p.y, vx:S.p.vx, finished:S.finished, crashed:S.crashed};
+  S.finished=false; S.crashed=false;
+  S.p.x = Math.min(LEVEL_LEN-500, Math.max(380, S.p.x));
+  S.p.y = groundY(S.p.x)-2; S.p.on=true; S.p.vx=180;
+  input.throttle=true;
+  computeCam(S.p); draw();
+  const cam0 = lastCam;
+  const probe = window.__BC_SCENERY_PROBE || {trees:[], decals:[], rocks:[]};
+  const rockWx = ((S.boulders||[]).find(b=>!b.hit && b.x>cam0.x+80 && b.x<cam0.x+W-40)||{}).x;
+  const treeWx = (probe.trees.find(t=>t.wx>cam0.x+80 && t.wx<cam0.x+W-40)||probe.trees[0]||{}).wx;
+  const decalWx = (probe.decals.find(t=>t.wx>cam0.x+80 && t.wx<cam0.x+W-40)||probe.decals[0]||{}).wx;
+  const sx0 = {
+    tree: treeWx!=null ? treeWx - cam0.x : null,
+    decal: decalWx!=null ? decalWx - cam0.x : null,
+    rock: rockWx!=null ? rockWx - cam0.x : null
+  };
+  for(let i=0;i<12;i++) step(1/60); // exactly 0.2s
+  computeCam(S.p); draw();
+  const cam1 = lastCam;
+  const dCam = cam1.x - cam0.x;
+  const sx1 = {
+    tree: treeWx!=null ? treeWx - cam1.x : null,
+    decal: decalWx!=null ? decalWx - cam1.x : null,
+    rock: rockWx!=null ? rockWx - cam1.x : null
+  };
+  const dTree = sx0.tree!=null && sx1.tree!=null ? sx1.tree - sx0.tree : null;
+  const dDecal = sx0.decal!=null && sx1.decal!=null ? sx1.decal - sx0.decal : null;
+  const dRock = sx0.rock!=null && sx1.rock!=null ? sx1.rock - sx0.rock : null;
+  const expect = -dCam;
+  const within = (a,b)=> a==null||b==null ? false : Math.abs(a-b) <= Math.max(1.5, Math.abs(b)*0.10);
+  const report = {
+    ok: within(dTree, expect) && within(dDecal, expect) && within(dRock, expect) && Math.abs(dCam)>8,
+    dCamX: +dCam.toFixed(2),
+    expectDx: +expect.toFixed(2),
+    dTree: dTree==null?null:+dTree.toFixed(2),
+    dDecal: dDecal==null?null:+dDecal.toFixed(2),
+    dRock: dRock==null?null:+dRock.toFixed(2),
+    matchTree: within(dTree, expect),
+    matchDecal: within(dDecal, expect),
+    matchRock: within(dRock, expect),
+    treeVsRock: within(dTree, dRock),
+    groundVsRock: within(dDecal, dRock),
+    nTrees: (window.__BC_SCENERY_PROBE&&window.__BC_SCENERY_PROBE.trees||[]).length,
+    nDecals: (window.__BC_SCENERY_PROBE&&window.__BC_SCENERY_PROBE.decals||[]).length,
+    formula: 'sx = wx - camX'
+  };
+  // Restore
+  S.p.x=saved.x; S.p.y=saved.y; S.p.vx=saved.vx; S.finished=saved.finished; S.crashed=saved.crashed;
+  window.__BC_SCENERY_LOCK = report;
+  return report;
+}
+window.assertSceneryWorldLock = assertSceneryWorldLock;
+
 Promise.all([initArt()]).then(async ()=>{
   resize(); reset();
   if(SHOT) applyShotFreeze();
@@ -2664,6 +3019,7 @@ Promise.all([initArt()]).then(async ()=>{
   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   if(AUTO) await runAutoTest();
   window.__BC_READY=true;
+  window.__BC_VER={ver:BC_VER, sha:BC_SHA};
 });
 </script>
 </body>
