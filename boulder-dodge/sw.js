@@ -1,4 +1,5 @@
-/* boulder-dodge-0.9.0-rebuild'boulder-dodge-0.9.0-rebuild';
+/* boulder-dodge-0.9.42-title-locker */
+const C='boulder-dodge-0.9.42-title-locker';
 const ASSETS=['./','./index.html','./sw.js'];
 const OWN=k=>k.indexOf('boulder-dodge-')===0;
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
