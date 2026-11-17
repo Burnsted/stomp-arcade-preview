@@ -44,7 +44,7 @@ canvas{display:block;width:100%;height:100%}
 <script>
 (function(){
 'use strict';
-var VER='0.9.28-man1-rig';
+var VER='0.9.31-bg-softedge';
 var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 var W=390,H=844,scale=1,OY=0,dpr=1;
 var GROUND=268,G=3400,JV=-980,DT=1/120;
@@ -95,11 +95,13 @@ function makeL1Chart(){
 /* Shared L1 chart — four levels rotate resort backdrops only */
 var L1_LEN=6400;
 var CHART=makeL1Chart();
+/* Variety plates (assets/bg-variety-v1): one per level, lazy-loaded; L1 plate gzip-capped.
+   Dropped aspen-grove (busy trunks camouflage rider/rocks) + dusk-glow (warm/cool fake seam). */
 var LEVELS=[
-  {id:'L1',name:'First Tracks',bg:'bg-bluebird.webp',sky:['#5aa0d0','#9ecce8','#e6f3fb']},
-  {id:'L2',name:'Alpenglow Bowl',bg:'bg-alpenglow.webp',sky:['#c45a3a','#e8a060','#f6d5a8']},
-  {id:'L3',name:'Storm Powder',bg:'bg-storm.webp',sky:['#6a7a88','#9aa8b4','#c8d2da']},
-  {id:'L4',name:'Night Park',bg:'bg-night.webp',sky:['#0e1a30','#1a3050','#2a4468']}
+  {id:'L1',name:'Rocky Ridge',bg:'bg-rocky-ridge.webp',sky:['#9DC0E4','#c5d9ee','#e8f1f8']},
+  {id:'L2',name:'Open Snowfield',bg:'bg-open-snowfield.webp',sky:['#A1C2E1','#c8daf0','#eaf3fa']},
+  {id:'L3',name:'Frozen Lake',bg:'bg-frozen-lake.webp',sky:['#4B8ECB','#8ab8dc','#d4e8f4']},
+  {id:'L4',name:'Alpine Bowl',bg:'bg-alpine-bowl.webp',sky:['#52A4DA','#8fc4e8','#d6ebf7']}
 ];
 var levelIdx=0;
 function curLevel(){return LEVELS[levelIdx%LEVELS.length];}
@@ -111,9 +113,20 @@ try{levelIdx=Math.max(0,Math.min(LEVELS.length-1,+(localStorage.getItem('bd9.lvl
 
 function rideX(){return Math.round(Math.max(72,Math.min(W*(isLand()?0.22:0.28),W*(isLand()?0.24:0.30))));}
 function isLand(){return W>H*1.15;}
-function riderSc(){return (RIDER_H_FRAC*H)/RIDER_LOCAL_H;}
-function worldRiderH(){return RIDER_H_FRAC*H;}
+/* Portrait: 10% of viewport height (~85 CSS @844). Landscape: 10% of short side, floor ~45 CSS px. */
+function targetRiderCss(){
+  if(isLand())return Math.max(45,RIDER_H_FRAC*Math.min(innerWidth,innerHeight));
+  return RIDER_H_FRAC*innerHeight;
+}
+function worldRiderH(){return targetRiderCss()*H/innerHeight;}
+function riderSc(){return worldRiderH()/RIDER_LOCAL_H;}
 function menuOpen(){var el=document.getElementById('menu');return el&&el.style.display!=='none';}
+function hexRgb(hex){
+  hex=(hex||'#9ecce8').replace('#','');
+  if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return [parseInt(hex.slice(0,2),16)||158,parseInt(hex.slice(2,4),16)||204,parseInt(hex.slice(4,6),16)||232];
+}
+function rgba(rgb,a){return 'rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+a+')';}
 /* game-units per atlas/CSS px — ride = RIDER_H_FRAC × playfield for every sprite */
 function artSc(){
   var rh=(ART.ok&&ART.atlas&&ART.atlas.frames.ride)?ART.atlas.frames.ride.h:RIDER_ATLAS_H;
@@ -290,7 +303,8 @@ function paintRiderCutout(pose,t){
   cx.translate(-fw/2, -fh+(pose.boardY||0));
   if(pose.bodyRot){cx.translate(fw/2,fh*0.55);cx.rotate(pose.bodyRot);cx.translate(-fw/2,-fh*0.55);}
   if(pose.air&&!pose.extend)cx.translate(0,Math.sin(t*5)*0.4);
-  cx.shadowColor='rgba(220,236,252,.55)';cx.shadowBlur=3.5;cx.shadowOffsetX=-1.2;cx.shadowOffsetY=-1.2;
+  /* Light rim / soft halo — separates dark kit from hazed crags */
+  cx.shadowColor='rgba(242,248,255,.85)';cx.shadowBlur=5;cx.shadowOffsetX=-1.6;cx.shadowOffsetY=-1.5;
   cx.drawImage(oc,-4,-4);
   cx.restore();
   return true;
@@ -349,48 +363,40 @@ function measureRigPixels(pose){
     ok:cssH>=75&&cssH<=95&&L.boardRatio>=1.6&&L.boardRatio<=2.1&&boardLenCss>=55&&!dup&&once};
 }
 
-/* —— Boulders: static, half-buried in snow (no roll/spin) — irregular lobes + snow drift —— */
+/* —— Boulders: static, half-buried — keep dark rock above snow; soft toe fade only —— */
+var ROCK_SCRATCH=null;
 function drawBoulder(x,gy,w,h,seed){
-  var cx0=x+w/2,s=seed|0,bury=Math.max(8,h*ROCK_BURY);
-  /* Soft contact shadow on the run */
-  cx.fillStyle='rgba(25,40,60,.28)';ell(cx0,gy+2,w*0.52,Math.max(4,h*0.09));cx.fill();
-  /* Plant bottom below snow line so the rock reads embedded, not rolling */
+  var cx0=x+w/2,s=seed|0;
+  /* Visual bury shallow so snow-cap ≠ under-disc; hitbox still uses ROCK_BURY */
+  var bury=Math.max(5,h*0.16),ez=Math.max(5,h*0.07);
+  var sw=Math.ceil(w*1.5),sh=Math.ceil(h+bury+6);
+  if(!ROCK_SCRATCH)ROCK_SCRATCH=document.createElement('canvas');
+  if(ROCK_SCRATCH.width!==sw||ROCK_SCRATCH.height!==sh){ROCK_SCRATCH.width=sw;ROCK_SCRATCH.height=sh;}
+  var tx=ROCK_SCRATCH.getContext('2d');
+  tx.clearRect(0,0,sw,sh);
+  tx.save();tx.translate(sw/2,h);
+  if(s%2)tx.scale(-1,1);
   if(ART.ok){
     var a=artSize('boulder');
-    if(a){
-      cx.save();cx.translate(cx0,gy+bury);
-      if(s%2)cx.scale(-1,1);
-      /* Draw at object w/h (already irregular via rockSize) — atlas frame reused, no upscale past artSc */
-      cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-w/2,-h,w,h);
-      cx.restore();
-    }
+    if(a)tx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-w/2,-h,w,h);
   }else{
-    cx.save();cx.translate(cx0,gy+bury*0.15);
-    var g=cx.createRadialGradient(-w*0.22,-h*0.55,2,0,-h*0.2,w*0.78);
+    var g=tx.createRadialGradient(-w*0.22,-h*0.55,2,0,-h*0.2,w*0.78);
     g.addColorStop(0,'#c4c9d0');g.addColorStop(0.45,'#8a9098');g.addColorStop(1,'#4a5058');
-    cx.fillStyle=g;
-    /* Irregular stacked lobes — not a round cannonball */
-    var ox=((s%5)-2)*w*0.03,oy=((s%3)-1)*h*0.02;
-    ell(-w*0.12+ox,-h*0.42+oy,w*(0.44+(s%3)*0.03),h*(0.40+(s%2)*0.04));cx.fill();
-    ell(w*0.20-ox,-h*0.30,w*(0.34+(s%4)*0.02),h*(0.32+(s%3)*0.03));cx.fill();
-    ell(ox*0.5,-h*0.16,w*0.50,h*0.26);cx.fill();
-    if(s%2){ell(-w*0.28,-h*0.22,w*0.22,h*0.18);cx.fill();}
-    cx.fillStyle='rgba(255,255,255,.16)';ell(-w*0.22,-h*0.52,w*0.16,h*0.12);cx.fill();
-    cx.fillStyle='rgba(30,35,42,.22)';ell(w*0.14,-h*0.20,w*0.14,h*0.12);cx.fill();
-    cx.restore();
+    tx.fillStyle=g;
+    tx.beginPath();tx.ellipse(-w*0.1,-h*0.4,w*0.45,h*0.4,0,0,7);tx.fill();
+    tx.beginPath();tx.ellipse(w*0.18,-h*0.28,w*0.34,h*0.3,0,0,7);tx.fill();
   }
-  /* Snow drift / cap over the burial line — rock sits IN the snow */
-  cx.fillStyle='#f4f9fd';
-  cx.beginPath();
-  cx.moveTo(x-w*0.12,gy+2);
-  cx.quadraticCurveTo(cx0-w*0.22,gy-h*0.10,cx0-w*0.05,gy-h*0.14);
-  cx.quadraticCurveTo(cx0+w*0.08,gy-h*0.20,cx0+w*0.18,gy-h*0.10);
-  cx.quadraticCurveTo(cx0+w*0.42,gy-h*0.04,x+w+w*0.12,gy+2);
-  cx.quadraticCurveTo(cx0,gy+5,x-w*0.12,gy+2);
-  cx.closePath();cx.fill();
-  cx.fillStyle='rgba(210,225,238,.7)';
-  ell(cx0-w*0.06,gy-h*0.08,w*0.22,Math.max(3,h*0.05));cx.fill();
-  if(s%2){cx.fillStyle='rgba(255,255,255,.55)';ell(cx0+w*0.1,gy-h*0.16,2.2,1.5);cx.fill();}
+  tx.restore();
+  /* Soft toe fade only — reveals slope under the rock foot, no plate */
+  tx.globalCompositeOperation='destination-out';
+  var erase=tx.createLinearGradient(0,h-ez,0,h+bury);
+  erase.addColorStop(0,'rgba(0,0,0,0)');
+  erase.addColorStop(0.55,'rgba(0,0,0,.45)');
+  erase.addColorStop(1,'rgba(0,0,0,1)');
+  tx.fillStyle=erase;tx.fillRect(0,h-ez,sw,ez+bury+2);
+  tx.globalCompositeOperation='source-over';
+  /* No light shadow under rock — blur halo read as a white plate */
+  cx.drawImage(ROCK_SCRATCH,cx0-sw/2,gy+bury-h);
 }
 function drawKicker(x,gy,w,h){
   /* no kicker in lite atlas — vector ramp */
@@ -785,26 +791,74 @@ function drawSky(){
     cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(sx,sy,11,0,7);cx.fill();
   }
 }
+var BG_SCRATCH=null;
+function drawBackdropHazeSoft(x,y,w,h){
+  /* Soft aerial wash only — gradients fade to 0 at edges (no hard bands) */
+  var sky=curLevel().sky,c0=hexRgb(sky[0]),c1=hexRgb(sky[1]),c2=hexRgb(sky[2]);
+  var g=cx.createLinearGradient(0,y,0,y+h);
+  g.addColorStop(0,rgba(c0,0.10));
+  g.addColorStop(0.35,rgba(c1,0.22));
+  g.addColorStop(0.7,rgba(c2,0.36));
+  g.addColorStop(0.9,rgba(c2,0.28));
+  g.addColorStop(1,rgba(c2,0));
+  cx.fillStyle=g;cx.fillRect(x,y,w,h);
+  var bandTop=y+h*0.45;
+  var g2=cx.createLinearGradient(0,bandTop,0,y+h);
+  g2.addColorStop(0,'rgba(236,244,250,0)');
+  g2.addColorStop(0.55,'rgba(240,247,252,.32)');
+  g2.addColorStop(1,'rgba(244,249,253,0)');
+  cx.fillStyle=g2;cx.fillRect(x,bandTop,w,Math.max(1,y+h-bandTop));
+}
 function drawBackdrop(dist){
   var file=curLevel().bg,img=ART.bg[file];
   if(!img){
-    /* plain sky already drawn — optional soft ridge while waiting */
     cx.fillStyle='rgba(74,106,136,.35)';cx.beginPath();cx.moveTo(-20,GROUND+90);
     for(var i=0;i<=8;i++)cx.lineTo(i*(W/8),GROUND-10-Math.abs(Math.sin(i*0.9+(dist*0.001)))*36);
     cx.lineTo(W+20,GROUND+90);cx.closePath();cx.fill();
     return;
   }
-  /* Cover height without distortion; bottom-anchored; tile X. Use natural image size (bluebird may be lightly downscaled). */
+  /* Full plate (own sky + natural peak silhouette). Width-fit; pin plate top to viewTop
+     so sky/peaks aren't cropped. Soft-fade bottom into snow — no straight edges. */
   var srcW=img.naturalWidth||img.width||780,srcH=img.naturalHeight||img.height||520;
-  var viewTop=-OY,viewBot=-OY+H;
-  var sc=H/srcH;
+  var viewTop=-OY,land=isLand();
+  var yBot=GROUND+(land?Math.min(56,H*0.14):Math.min(120,H*0.17));
+  /* Cover [viewTop → yBot] with the full plate so plate sky fills the top (no sky/plate seam)
+     and peak silhouettes stay natural. Soft-fade the bottom — no straight edges. */
+  var needH=Math.max(120,yBot-viewTop);
+  var scW=(W*(land?1.04:1.08))/srcW;
+  var scH=needH/srcH;
+  var sc=Math.max(scW,scH);
   var dw=srcW*sc,dh=srcH*sc;
-  var yBot=GROUND+Math.min(120,H*0.18);
-  var y=yBot-dh;
-  if(y>viewTop)y=viewTop;
-  if(y+dh<viewBot)y=viewBot-dh;
-  var off=(dist*0.045)%dw,x;
-  for(x=-off-dw;x<W+dw;x+=dw)cx.drawImage(img,0,0,srcW,srcH,x,y,dw,dh);
+  var y=viewTop; /* plate sky at top of playfield */
+  var travel=Math.max(1,dw-W);
+  var x0=-((dist*0.028)%travel);
+  var sw=Math.max(1,Math.ceil(dw)),sh=Math.max(1,Math.ceil(dh));
+  if(!BG_SCRATCH)BG_SCRATCH=document.createElement('canvas');
+  if(BG_SCRATCH.width!==sw||BG_SCRATCH.height!==sh){BG_SCRATCH.width=sw;BG_SCRATCH.height=sh;}
+  var tx=BG_SCRATCH.getContext('2d');
+  tx.clearRect(0,0,sw,sh);
+  tx.drawImage(img,0,0,srcW,srcH,0,0,sw,sh);
+  /* Soft-fade plate bottom into fog/snow — long feather past the play band */
+  tx.globalCompositeOperation='destination-out';
+  var fadeH=Math.max(48,sh*(land?0.42:0.30));
+  var erase=tx.createLinearGradient(0,sh-fadeH,0,sh);
+  erase.addColorStop(0,'rgba(0,0,0,0)');
+  erase.addColorStop(0.25,'rgba(0,0,0,.12)');
+  erase.addColorStop(0.55,'rgba(0,0,0,.4)');
+  erase.addColorStop(0.8,'rgba(0,0,0,.75)');
+  erase.addColorStop(1,'rgba(0,0,0,1)');
+  tx.fillStyle=erase;tx.fillRect(0,sh-fadeH,sw,fadeH+2);
+  tx.globalCompositeOperation='source-over';
+  cx.drawImage(BG_SCRATCH,x0,y);
+  drawBackdropHazeSoft(x0,y,dw,Math.min(dh,yBot-y+fadeH*0.5));
+  /* Extra soft fog veil so plate never meets a flat pale band with a hard line */
+  var fogTop=yBot-Math.min(H*0.28,dh*0.35),fogBot=yBot+Math.min(80,H*0.12);
+  var fog=cx.createLinearGradient(0,fogTop,0,fogBot);
+  fog.addColorStop(0,'rgba(244,249,253,0)');
+  fog.addColorStop(0.45,'rgba(236,244,250,.22)');
+  fog.addColorStop(0.8,'rgba(244,249,253,.4)');
+  fog.addColorStop(1,'rgba(244,249,253,0)');
+  cx.fillStyle=fog;cx.fillRect(x0-4,fogTop,dw+8,Math.max(1,fogBot-fogTop));
 }
 function drawNearSnow(){
   /* Soft vertical fill only — no groomer strokes, no ovals (Ted: no notebook lines) */
@@ -1005,7 +1059,8 @@ window.BoulderDodge={
   _test:{
     state:function(){return S;},step:step,jump:jump,spinTap:spinTap,beginPress:beginPress,canvasRelease:canvasRelease,
     holdSet:holdSet,draw:draw,reset:reset,crash:crash,buildObs:buildObs,gromSize:gromSize,fairGap:fairGap,setSeed:setSeed,
-    setLevel:setLevel,curLevel:curLevel,ensureBackdrop:ensureBackdrop,gY:gY,slopeAt:slopeAt,terr:terr,pineBlocked:pineBlocked,drawWorldPines:drawWorldPines,poseFor:poseFor,paintRider:paintRider,paintRiderCutout:paintRiderCutout,riderProfileMetrics:riderProfileMetrics,measureRigPixels:measureRigPixels,rigLayout:rigLayout,cutoutSc:cutoutSc,RIG_PARTS:RIG_PARTS,getRigDrawCounts:function(){return RIG_DRAW_COUNTS;},getRigMeta:function(){return ART.rigMeta;},
+    setLevel:setLevel,curLevel:curLevel,LEVELS:LEVELS,ensureBackdrop:ensureBackdrop,gY:gY,slopeAt:slopeAt,terr:terr,pineBlocked:pineBlocked,drawWorldPines:drawWorldPines,poseFor:poseFor,paintRider:paintRider,paintRiderCutout:paintRiderCutout,riderProfileMetrics:riderProfileMetrics,measureRigPixels:measureRigPixels,rigLayout:rigLayout,cutoutSc:cutoutSc,RIG_PARTS:RIG_PARTS,getRigDrawCounts:function(){return RIG_DRAW_COUNTS;},getRigMeta:function(){return ART.rigMeta;},
+    setLevelPlate:function(i,bg,sky){var lv=LEVELS[((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length];if(bg)lv.bg=bg;if(sky)lv.sky=sky;ensureBackdrop(lv.bg);},
     clearSpin:clearSpin,clearFlip:clearFlip,clearTricks:clearTricks,
     spinLandingClean:spinLandingClean,flipLandingClean:flipLandingClean,spinTier:spinTier,landFromAir:landFromAir,
     getLives:function(){return lives;},setLives:function(n){lives=Math.max(0,Math.min(LIVES_MAX,n|0));},
@@ -1016,7 +1071,7 @@ window.BoulderDodge={
       LIVES_MAX:LIVES_MAX,GROM_SPD_FRAC:GROM_SPD_FRAC,GROM_HIT:GROM_HIT,GROM_CLEAR_PTS:GROM_CLEAR_PTS,GROM_PAD_T:GROM_PAD_T},
     apexFloorY:apexFloorY,clampApex:clampApex,
     measureRider:function(){
-      var playCss=innerHeight,riderCss=RIDER_H_FRAC*playCss;
+      var playCss=innerHeight,riderCss=targetRiderCss();
       return{
         riderHFrac:RIDER_H_FRAC,
         riderLocalH:RIDER_LOCAL_H,
