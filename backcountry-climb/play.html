@@ -201,16 +201,52 @@ function lipDelta(wx){
   }
   return lip;
 }
-/** Uphill terrain: rising grade + rollers + sculpted snow lips (built into the surface). */
-function groundY(wx){
+/** True if world x sits inside a kicker / pad / lip span. */
+function onFeatureSpan(wx, pad){
+  pad=pad||18;
+  for(const [cx0,w] of LIPS){
+    if(wx>=cx0-pad && wx<=cx0+w+pad) return true;
+  }
+  return false;
+}
+/** Base slope only (grade + rollers) — never rides a kicker. Used for planted scenery. */
+function baseGroundY(wx){
   const base=420;
   const grade=-(wx)*0.085;
   const roll=Math.sin(wx*0.011)*18+Math.sin(wx*0.027+1.2)*9;
-  return base+grade+roll+lipDelta(wx);
+  return base+grade+roll;
+}
+/** Uphill terrain: rising grade + rollers + sculpted snow lips (built into the surface). */
+function groundY(wx){
+  return baseGroundY(wx)+lipDelta(wx);
 }
 function slopeAt(wx){
   const dx=14;
   return Math.atan2(groundY(wx+dx)-groundY(wx-dx), dx*2);
+}
+function baseSlopeAt(wx){
+  const dx=14;
+  return Math.atan2(baseGroundY(wx+dx)-baseGroundY(wx-dx), dx*2);
+}
+/** Shift a candidate pine x off any kicker/lip span onto nearby base snow. */
+function plantPineX(seed){
+  let x=seed;
+  for(let i=0;i<24;i++){
+    if(!onFeatureSpan(x, 28)) return x;
+    x += 36;
+  }
+  return x;
+}
+/** Sparse fixed world-x pines for the whole climb (≤1–2 visible per screen). */
+function buildPines(){
+  const out=[];
+  // Fixed world positions — never follow the sled
+  const seeds=[220, 520, 880, 1240, 1580, 1920, 2260];
+  for(const seed of seeds){
+    const x=plantPineX(seed);
+    out.push({x, s:0.9+((x*13)%10)/100});
+  }
+  return out;
 }
 /** Prefer gentle slopes / flats for boulder seats (never sharp peak tips). */
 function seatOnSlope(seedX){
@@ -315,8 +351,10 @@ function reset(){
   };
   S={
     t:0, p, score:0, combo:1, comboChain:0, height:0, bestHeight:0,
-    boulders:[], finished:false, crashed:false, dist:0, trickIdx:0,
-    landFlash:0, airTime:0, jumpsLanded:0, tricksLanded:0
+    boulders:[], pines:buildPines(), finished:false, crashed:false, dist:0, trickIdx:0,
+    landFlash:0, airTime:0, jumpsLanded:0, tricksLanded:0,
+    // Look7 life (transforms only — art locked)
+    lean:0, bob:0, tuck:0, compress:0
   };
   // Fixed shelf seats on gentle slopes (never peak tips)
   const seats=[460,640,860,1080,1280,1520,1740,1960,2140,2320];
@@ -325,7 +363,8 @@ function reset(){
     S.boulders.push({x:bx, r:15+((i*11)%14), spin:0, hit:false, bury:0.48+((i*5)%8)/100, home:bx});
   }
   syncHud();
-  window.__BC_GAME={running:true, levelLen:LEVEL_LEN};
+  window.__BC_PINES = S.pines.map(pn=>({x:pn.x, baseY:baseGroundY(pn.x), onFeature:onFeatureSpan(pn.x)}));
+  window.__BC_GAME={running:true, levelLen:LEVEL_LEN, pines:window.__BC_PINES};
 }
 
 function step(dt){
@@ -338,6 +377,9 @@ function step(dt){
   if(input.nose && !p.on && !p.trick && performance.now()-input.noseHeld>160) startHoldFlip();
 
   const slope=slopeAt(p.x);
+  // Look7 life targets (eased below) — climb lean-back, descent lean-forward
+  const climbLean = Math.max(-0.22, Math.min(0.28, -slope*0.55 + (input.nose?0.12:0) - (input.throttle&&slope>0.05?0.08:0)));
+  const bump = Math.abs(lipDelta(p.x)-lipDelta(p.x-10))*0.04 + Math.abs(Math.sin(p.x*0.027))*0.5;
   if(p.on){
     const thr=input.throttle?1:0;
     const steep=Math.max(0, -slope);
@@ -359,6 +401,8 @@ function step(dt){
       p.on=false; p.vy=-680 - Math.max(0,-ahead)*400; p.ang=slope-0.15; S.airTime=0;
     }
     p.charge=Math.max(0, Math.min(1, p.charge - thr*0.07*dt + (1-thr)*0.025*dt));
+    S.tuck += (0 - S.tuck)*Math.min(1, 8*dt);
+    S.bob += ((Math.sin(S.t*10)*1.6 + bump*2.2) - S.bob)*Math.min(1, 10*dt);
   } else {
     S.airTime+=dt;
     p.vy+=3600*dt;
@@ -380,7 +424,7 @@ function step(dt){
     if(p.y>=g2 && p.vy>0){
       const err=Math.abs(p.ang - slopeAt(p.x));
       const hard=p.vy>1100;
-      p.y=g2; p.vy=0; p.on=true; S.landFlash=0.35;
+      p.y=g2; p.vy=0; p.on=true; S.landFlash=0.35; S.compress=1;
       if(err>0.85 || (hard && err>0.55)){
         if(!S._auto) p.lives--;
         if(p.trick){ toast('BAILED'); p.trick=null; S.combo=1; S.comboChain=0; }
@@ -407,7 +451,14 @@ function step(dt){
       S.airTime=0;
     }
     p.charge=Math.max(0, p.charge - (input.throttle?0.03:0)*dt);
+    // Air tuck / body tilt through tricks
+    const tuckTgt = p.trick ? 0.16 : 0.08;
+    S.tuck += (tuckTgt - S.tuck)*Math.min(1, 6*dt);
+    S.bob += (0 - S.bob)*Math.min(1, 6*dt);
   }
+
+  S.lean += (climbLean - S.lean)*Math.min(1, 7*dt);
+  if(S.compress>0) S.compress=Math.max(0, S.compress - 2.8*dt);
 
   for(const b of S.boulders){
     if(b.hit) continue;
@@ -450,14 +501,26 @@ document.getElementById('again').onclick=()=>reset();
 function humanPx(){ return H*HUMAN_H_FRAC; }
 function artScale(){ return humanPx()/85; }
 
+/**
+ * Look7 sled+driver (art locked). Life via transforms only:
+ * lean on climbs/descents, bob over bumps, tuck/tilt in air, compress on landing.
+ */
 function blitSled(x,y,ang){
   if(!ART.world) return;
   const sf=ART.world.frames.sled;
   const sc=artScale();
   const sw=(sf.w/2)*sc, sh=(sf.h/2)*sc;
+  const lean=S?S.lean:0;
+  const bob=S?S.bob:0;
+  const tuck=S?S.tuck:0;
+  const compress=S?S.compress:0;
+  const sy = 1 - compress*0.14 - tuck*0.08;
+  const sx = 1 + compress*0.08 - tuck*0.04;
   cx.save();
-  cx.translate(x,y);
-  cx.rotate(ang||0);
+  cx.translate(x, y + bob);
+  cx.rotate((ang||0) + lean);
+  cx.scale(sx, sy);
+  // Look7 faces right — no mirror
   cx.drawImage(ART.world.img, sf.x,sf.y,sf.w,sf.h, -sw/2,-sh, sw,sh);
   cx.restore();
 }
@@ -644,9 +707,20 @@ function draw(){
 
   drawSnowLipShades(camX, camY);
 
-  // Sparse scenery near the sled — feet planted on this frame's terrain surface
-  const pineX=p.x + 160;
-  blitWorld('pine_tall', pineX, groundY(pineX)+3, 0, {s:0.95});
+  // Fixed world-x pines — scroll 1:1 with snow; sit on base slope (never a kicker)
+  // At most ~1–2 visible per screen. Never welded to the sled.
+  let pinesDrawn=0;
+  for(const pn of S.pines){
+    if(pn.x<camX-40 || pn.x>camX+W+40) continue;
+    if(pinesDrawn>=2) break;
+    const gy=baseGroundY(pn.x);
+    blitWorld('pine_tall', pn.x, gy+3, baseSlopeAt(pn.x)*0.15, {s:pn.s||0.95});
+    pinesDrawn++;
+  }
+  window.__BC_PINES_VISIBLE = S.pines
+    .filter(pn=>pn.x>=camX-40 && pn.x<=camX+W+40)
+    .slice(0,2)
+    .map(pn=>({x:pn.x, baseY:baseGroundY(pn.x), screenX:pn.x-camX, onFeature:onFeatureSpan(pn.x)}));
 
   // Boulders — half-buried on seated slopes/flats
   for(const b of S.boulders){
@@ -669,7 +743,8 @@ function draw(){
     cx.fillText('SUMMIT', fx+22, fy-79);
   }
 
-  blitSled(p.x, p.y, p.ang + (p.trick&&!p.on ? Math.sin(S.t*10)*0.05 : 0));
+  const airWobble = (!p.on && p.trick) ? Math.sin(S.t*9)*0.04 : 0;
+  blitSled(p.x, p.y, p.ang + airWobble);
   if(p.on || p.y>groundY(p.x)-8){
     cx.fillStyle='rgba(30,50,70,.18)';
     cx.beginPath(); cx.ellipse(p.x, groundY(p.x)+2, 28, 5, 0, 0, Math.PI*2); cx.fill();
@@ -821,8 +896,21 @@ async function runAutoTest(){
   report.visual=visualClearCheck();
   report.terrainAirOk = report.terrainAir.length>0 && report.terrainAir.every(t=>t.ok);
 
+  // Fail-test: pines must be fixed world-x, never sled-welded, never on kickers
+  const pineSnap = (S.pines||[]).map(pn=>({x:pn.x, onFeature:onFeatureSpan(pn.x)}));
+  const pineFollowFail = pineSnap.some(pn=>Math.abs(pn.x - (S.p.x+160))<1);
+  const pineFeatureFail = pineSnap.some(pn=>pn.onFeature);
+  const pineWorldOk = pineSnap.length>0 && !pineFollowFail && !pineFeatureFail;
+  // Stability: world x unchanged across the climb
+  const pineStart = window.__BC_PINES || [];
+  const pineStable = pineStart.length===pineSnap.length &&
+    pineStart.every((pn,i)=>Math.abs(pn.x - pineSnap[i].x)<0.01);
+  report.pines={ok:pineWorldOk&&pineStable, followFail:pineFollowFail, featureFail:pineFeatureFail,
+    stable:pineStable, list:pineSnap};
+
   const cOk = report.controls.portrait.ok && (report.controls.landscape?report.controls.landscape.ok:true);
-  report.ok = !!(S.won && S.jumpsLanded>=3 && S.tricksLanded>=2 && cOk && report.visual.ok && report.terrainAirOk);
+  report.ok = !!(S.won && S.jumpsLanded>=3 && S.tricksLanded>=2 && cOk && report.visual.ok
+    && report.terrainAirOk && report.pines.ok);
   report.jumpsLanded=S.jumpsLanded; report.tricksLanded=S.tricksLanded;
   report.score=S.score; report.won=S.won; report.height=S.height;
   report.CAM_ROT=CAM_ROT; report.HUMAN_H_FRAC=HUMAN_H_FRAC;
@@ -840,13 +928,20 @@ function applyShotFreeze(){
     S.p.on=false; S.p.x=760; S.p.y=groundY(760)-78; S.p.vy=-140; S.p.ang=-0.5;
     S.p.trick=TRICKS[4]; S.p.spinAcc=-Math.PI; S.airTime=0.5;
     S.score=420; S.p.charge=0.72; BG.key='alpenglow';
+    S.lean=-0.18; S.tuck=0.14; S.bob=0; S.compress=0;
     toast('BACKFLIP');
   } else if(SHOT==='land'){
     S.p.on=true; S.p.x=820; S.p.y=groundY(820); S.p.ang=slopeAt(820); S.landFlash=0.3;
     S.jumpsLanded=2; S.tricksLanded=1; S.score=280; S.p.charge=0.68;
+    S.lean=0.06; S.compress=0.85; S.tuck=0; S.bob=0;
     toast('HEEL CLICKER +140'); BG.key='storm';
   } else if(SHOT==='controls'){
     S.p.x=500; S.p.y=groundY(500); S.p.charge=0.85; BG.key=FORCE_BG||'storm';
+    S.lean=-0.1; S.bob=1.2;
+  } else if(SHOT==='pine'){
+    // Plant sled so a fixed world pine is clearly on-screen (not glued to sled)
+    S.p.x=400; S.p.y=groundY(400); S.p.ang=slopeAt(400); S.p.charge=0.9;
+    BG.key=FORCE_BG||'storm';
   }
   syncHud();
   computeCam(S.p);
