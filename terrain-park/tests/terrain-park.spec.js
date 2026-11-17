@@ -55,6 +55,51 @@ test.describe("Terrain Park v0.5.1-next", () => {
     // Boot into play with jump available
     await expect(page.locator("button.jump.air")).toBeVisible();
 
+    // Fail-test: Woman3 cutout rig is side-profile (not a front-facing box torso) and articulates.
+    {
+      const carve = await page.evaluate(() => {
+        const TP = window.TerrainPark;
+        TP.setGod(true); TP.debugStart(1);
+        const S = TP.state();
+        S.feats = []; S.p.on = true; S.p.vy = 0; S.hop = 0; S.land = 0;
+        TP.step(0);
+        return TP.getRiderDebug();
+      });
+      expect(carve.hasRig).toBe(true);
+      expect(carve.profile).toBe(true);
+      expect(carve.parts).toBeGreaterThanOrEqual(8);
+      expect(carve.torsoH).toBeGreaterThan(carve.torsoW * 0.7); // jacket taller than wide in side crop
+      expect(carve.headFacing).toBeGreaterThan(0); // head leads downhill (+X)
+
+      const pop = await page.evaluate(() => {
+        const TP = window.TerrainPark;
+        const S = TP.state();
+        S.p.on = false; S.p.vy = -500; S.hop = 0.7; S.land = 0;
+        TP.step(0);
+        return TP.getRiderDebug();
+      });
+      const tuck = await page.evaluate(() => {
+        const TP = window.TerrainPark;
+        const S = TP.state();
+        S.p.on = false; S.holding = true; S.hop = 0;
+        TP.setFlip(Math.PI * 0.8);
+        TP.step(0);
+        return TP.getRiderDebug();
+      });
+      const land = await page.evaluate(() => {
+        const TP = window.TerrainPark;
+        const S = TP.state();
+        S.p.on = true; S.holding = false; S.flip = 0; S.hop = 0; S.land = 1;
+        TP.step(0);
+        return TP.getRiderDebug();
+      });
+      // Not a single static frame — pose mode / knee changes across states.
+      const modes = new Set([carve.mode, pop.mode, tuck.mode, land.mode]);
+      expect(modes.size).toBeGreaterThanOrEqual(2);
+      expect(land.knee).toBeGreaterThan(pop.knee);
+      expect(tuck.knee).toBeGreaterThan(0.2);
+    }
+
     // Open menu — version string visible
     await page.locator('button[aria-label="Park menu"]').click();
     await expect(page.locator('.sheet.menu .foot')).toContainText("v0.5.1-next");
@@ -296,6 +341,52 @@ print(out, im.size)
     expect(layerCheck.treeCount).toBeLessThanOrEqual(2); // sparse: ≤1–2 foreground pines
     expect(layerCheck.fgCount).toBeGreaterThan(0);
     expect(layerCheck.fenceCount).toBe(0);
+
+    // World-fixed pines: tracked pine keeps a constant world-x while visible (~1s travel).
+    const pineWorld = await page.evaluate(() => {
+      const TP = window.TerrainPark;
+      TP.setGod(true); TP.setOverview(false); TP.debugStart(5);
+      const S = TP.state();
+      S.feats = []; // clear features so a pine can sit
+      for (let i = 0; i < 30; i++) TP.step(1 / 60);
+      TP.step(0);
+      const t0 = TP.getTrees();
+      if (!t0.length) return { ok: false, reason: "no-pine" };
+      // Prefer a pine ahead of the rider so it stays on-screen longer.
+      const ranked = t0
+        .map((t) => ({ t, wx: S.dist + t.x - S.p.x }))
+        .sort((a, b) => b.t.x - a.t.x);
+      const pick = ranked[0];
+      const wx0 = pick.wx;
+      const x0 = pick.t.x;
+      const dist0 = S.dist;
+      /** @type {{ wx: number, x: number, dist: number }[]} */
+      const samples = [];
+      for (let i = 0; i < 60; i++) {
+        TP.step(1 / 60);
+        if (i % 10 === 9) {
+          TP.step(0);
+          const hit = TP.getTrees()
+            .map((t) => ({ t, wx: S.dist + t.x - S.p.x }))
+            .find((e) => Math.abs(e.wx - wx0) < 2);
+          if (hit) samples.push({ wx: hit.wx, x: hit.t.x, dist: S.dist });
+        }
+      }
+      return {
+        ok: samples.length >= 2,
+        reason: samples.length < 2 ? "lost-pine" : "ok",
+        wx0,
+        wxSpread: samples.length ? Math.max(...samples.map((s) => s.wx)) - Math.min(...samples.map((s) => s.wx)) : null,
+        screenDelta: samples.length ? samples[samples.length - 1].x - x0 : null,
+        distDelta: S.dist - dist0,
+        samples: samples.length,
+      };
+    });
+    expect(pineWorld.ok).toBe(true);
+    expect(pineWorld.distDelta).toBeGreaterThan(40);
+    expect(pineWorld.wxSpread).toBeLessThan(2);
+    // Screen x must move with the snow (not stick to the rider).
+    expect(Math.abs(pineWorld.screenDelta)).toBeGreaterThan(30);
 
     // Wind drifts falling flakes (no streak ribbons); direction matches physics.
     const windCheck = await page.evaluate(() => {
@@ -1172,6 +1263,126 @@ strip(${JSON.stringify(stripDirs.crash)}, ${JSON.stringify(path.join(ART, "phone
         });
         await page.waitForTimeout(40);
         await page.screenshot({ path: path.join(ART, "phone-multiflip-big.png") });
+
+        // Ted 11/16 pines kept; Woman3 cutout-rig rider QA
+        await page.setViewportSize({ width: 390, height: 844 });
+
+        // Carve lean on snow (side profile)
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = true; S.p.vy = 0; S.hop = 0; S.land = 0; S.holding = false;
+          for (let i = 0; i < 8; i++) TP.step(1 / 60);
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-carve.png") });
+
+        // Pop / extend
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = -620; S.p.y = 235;
+          S.hop = 0.72; S.holding = false; S.flip = 0; S.yaw = 0;
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-pop.png") });
+
+        // Air tuck
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = false; S.p.vy = -120; S.p.y = 210;
+          S.hop = 0; S.holding = false;
+          TP.setFlip(0.15); TP.setYaw(0); TP.setAirAmp(67.5);
+          // Force a tucked knee via land/hop off and spin pose
+          S.holding = true; TP.setFlip(0.35);
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-air-tuck.png") });
+
+        // Readable flip over kicker
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          const kickWx = S.dist + S.p.x + 40;
+          S.feats.push({
+            k: "kicker", wx: kickWx, w: 0, h: 0, ap: 72, dk: 16, ex: 118,
+            amp: 67.5, gap: 0, r: 0, vx: 0, ph: 0, step: 0, variant: "table",
+          });
+          S.dist = kickWx - S.p.x - 8;
+          S.p.on = false; S.p.vy = -200; S.p.y = 195;
+          S.hop = 0; S.holding = true;
+          TP.setFlip(Math.PI * 0.9); TP.setYaw(0); TP.setAirAmp(67.5);
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-flip.png") });
+
+        // Landing absorb
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(3); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = true; S.p.vy = 0;
+          for (let i = 0; i < 2; i++) TP.step(1 / 60);
+          S.p.on = true; S.land = 1; S.hop = 0; S.holding = false;
+          S.flip = 0; S.yaw = 0; S.grab = null; S.grabEase = 0;
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-land-absorb.png") });
+
+        // Side-by-side: Franz Woman3 ride frame vs live cutout rig
+        await page.evaluate(() => {
+          const TP = window.TerrainPark;
+          TP.setGod(true); TP.debugStart(1); TP.setBackdrop("bluebird");
+          const S = TP.state();
+          S.feats = []; S.pops = [];
+          S.p.on = true; S.p.vy = 0; S.hop = 0; S.land = 0;
+          S.mode = "pause"; TP.step(0);
+        });
+        await page.waitForTimeout(40);
+        await page.screenshot({ path: path.join(ART, "phone-rider-rig-live.png") });
+        require("child_process").execFileSync("python3", ["-c", `
+from PIL import Image, ImageDraw
+import subprocess, os
+ART=${JSON.stringify(ART)}
+subprocess.check_call(['ffmpeg','-y','-i','assets/rider-atlas@2x.webp','/tmp/rider-atlas-cmp.png'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+atlas=Image.open('/tmp/rider-atlas-cmp.png').convert('RGBA')
+ride=atlas.crop((0,17,150,187))
+live=Image.open(os.path.join(ART,'phone-rider-rig-live.png')).convert('RGBA')
+w,h=live.size
+# Center crop around the rider
+band=live.crop((int(w*0.12), int(h*0.30), int(w*0.72), int(h*0.72)))
+target_h=420
+scale=target_h/band.size[1]
+band2=band.resize((int(band.size[0]*scale), target_h), Image.Resampling.LANCZOS)
+rh=target_h-40
+rw=int(ride.size[0]*rh/ride.size[1])
+ride2=ride.resize((rw,rh), Image.Resampling.LANCZOS)
+gap=28
+canvas_w=rw+gap+band2.size[0]+48
+canvas=Image.new('RGB',(canvas_w, target_h+56),(16,8,32))
+d=ImageDraw.Draw(canvas)
+d.text((24,14),'Franz Woman3 frame', fill=(244,236,255))
+d.text((rw+gap+36,14),'Live cutout rig (side profile)', fill=(244,236,255))
+canvas.paste(Image.new('RGB',(rw+24,rh+24),(10,4,22)),(12,44))
+canvas.paste(ride2.convert('RGB'),(24,56), ride2)
+canvas.paste(band2.convert('RGB'),(rw+gap+24,44))
+canvas.save(os.path.join(ART,'phone-rider-side-by-side.png'),'PNG')
+`]);
       }
 
       // (f) overview

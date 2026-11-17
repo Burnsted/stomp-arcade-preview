@@ -3,7 +3,8 @@
     "argv": [
       "/exec-daemon/node",
       "/agent/repos/stomp-preview/arcade/terrain-park-next/node_modules/.bin/playwright",
-      "test"
+      "test",
+      "--project=desktop"
     ],
     "configFile": "/agent/repos/stomp-preview/arcade/terrain-park-next/playwright.config.js",
     "rootDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
@@ -55,40 +56,6 @@
       }
     ],
     "filteredProjects": [
-      {
-        "grep": {},
-        "grepInvert": null,
-        "outputDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/test-evidence/test-output",
-        "repeatEach": 1,
-        "retries": 0,
-        "metadata": {
-          "actualWorkers": 1
-        },
-        "name": "phone",
-        "testDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
-        "snapshotDir": "/agent/repos/stomp-preview/arcade/terrain-park-next/tests",
-        "testIgnore": [],
-        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
-        "timeout": 120000,
-        "use": {
-          "baseURL": "http://127.0.0.1:8788/arcade/terrain-park-next/",
-          "trace": "off",
-          "video": "off",
-          "screenshot": "only-on-failure",
-          "browserName": "chromium",
-          "viewport": {
-            "width": 390,
-            "height": 844
-          },
-          "deviceScaleFactor": 2,
-          "isMobile": true,
-          "hasTouch": true,
-          "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1"
-        },
-        "dependencies": [],
-        "ignoreSnapshots": false,
-        "__projectId": "phone"
-      },
       {
         "grep": {},
         "grepInvert": null,
@@ -175,52 +142,19 @@
                   "timeout": 120000,
                   "annotations": [],
                   "expectedStatus": "passed",
-                  "projectId": "phone",
-                  "projectName": "phone",
+                  "projectId": "desktop",
+                  "projectName": "desktop",
                   "results": [
                     {
                       "workerIndex": 0,
                       "parallelIndex": 0,
                       "status": "passed",
-                      "duration": 51237,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [
-                        {
-                          "text": ""
-                        },
-                        {
-                          "text": ""
-                        },
-                        {
-                          "text": ""
-                        }
-                      ],
-                      "retry": 0,
-                      "startTime": "2026-11-12T16:55:20.876Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                },
-                {
-                  "timeout": 120000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "desktop",
-                  "projectName": "desktop",
-                  "results": [
-                    {
-                      "workerIndex": 1,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 5696,
+                      "duration": 9713,
                       "errors": [],
                       "stdout": [],
                       "stderr": [],
                       "retry": 0,
-                      "startTime": "2026-11-12T16:56:12.582Z",
+                      "startTime": "2026-11-17T03:16:43.554Z",
                       "annotations": [],
                       "attachments": []
                     }
@@ -228,7 +162,7 @@
                   "status": "expected"
                 }
               ],
-              "id": "65cf716cf061a72b2aa1-839c1a6a533cb39b1ffb",
+              "id": "65cf716cf061a72b2aa1-c7211fa13e2cc928ccf3",
               "file": "terrain-park.spec.js",
               "line": 30,
               "column": 3
@@ -240,9 +174,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-11-12T16:55:20.231Z",
-    "duration": 58170.935,
-    "expected": 2,
+    "startTime": "2026-11-17T03:16:43.027Z",
+    "duration": 10375.048,
+    "expected": 1,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

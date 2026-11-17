@@ -2,9 +2,9 @@
 
 import {
   loadArt, ensureBackdrop, drawAtlasFrame, frameWu, RIDER_FRAMES, WORLD_FRAMES, GROM_FRAMES, KICKER_FRAME,
-  RIDE_ATLAS_H, RIDE_NATIVE_CSS,
+  RIDE_NATIVE_CSS, RIDE_ATLAS_H,
   BG_W, BG_H, BG_SRC_TOP, BG_SRC_END, BG_SRC_H,
-  type ArtKit, type RiderFrameId, type BackdropId,
+  type ArtKit, type BackdropId, type RiderFrameId, type RigPart,
 } from "./art";
 
 export const VERSION = "0.5.1-next";
@@ -403,7 +403,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   /** When set, draw() paints the pose QA sheet instead of the ride (frozen for screenshots). */
   let poseSheetLock = false;
   /** Franz atlases + resort backdrops — null/failed → vector / skip fallback. */
-  let art: ArtKit = { ready: false, rider: null, world: null, grom: null, kicker: null, bg: {}, bgSky: {} };
+  let art: ArtKit = { ready: false, rider: null, rig: null, rigMeta: null, world: null, grom: null, kicker: null, bg: {}, bgSky: {} };
   /** At most one Franz grom per gap between park features (from level 2). */
   let gapHasGrom = false;
   /** Forced backdrop for evidence shots; null = alternate by level. */
@@ -421,7 +421,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     return bgForce || backdropForLevel(LV?.n || 1);
   }
   function atlasDpr() { return window.devicePixelRatio || 1; }
-  function artOk() { return !!(art.ready && art.rider && art.world); }
+  function artOk() { return !!(art.ready && art.world && (art.rig || art.rider)); }
   function sprWu(frame: { w: number; h: number }) {
     return frameWu(frame, atlasDpr(), scale, spriteG);
   }
@@ -2328,9 +2328,34 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
   function currentPose(): Pose {
     const air = !S.p.on && !S.grindOn;
     let base = poseIdle(air);
+    // Lean with the fall-line when riding snow / rails.
+    if (!air) {
+      const sl = slopeAt(S.p.x);
+      base.lean += Math.max(-0.22, Math.min(0.22, sl * 0.9));
+    }
+    // Pop: crouch → extend (S.hop 1→0). Early crouch, mid-air open, settle.
+    if (S.hop > 0.02) {
+      const crouch = Math.max(0, Math.min(1, (S.hop - 0.62) / 0.38));
+      const extend = Math.sin(Math.max(0, Math.min(1, S.hop)) * Math.PI);
+      base.knee = crouch * 0.78 + (1 - crouch) * Math.max(0.02, 0.22 * (1 - extend));
+      base.arch = -extend * 0.38;
+      base.lArmX = -20 - extend * 10; base.lArmY = -28 - extend * 32;
+      base.rArmX = 20 + extend * 10; base.rArmY = -26 - extend * 30;
+      base.stance = 1 + extend * 0.08;
+    }
+    // Landing absorb — knees compress, arms settle.
+    if (!air && S.land > 0.05) {
+      const a = Math.min(1, S.land);
+      base.knee = Math.max(base.knee, 0.22 + a * 0.7);
+      base.arch = Math.max(base.arch, a * 0.14);
+      base.lArmY = Math.min(base.lArmY, -20 + a * 6);
+      base.rArmY = Math.min(base.rArmY, -18 + a * 6);
+    }
     if (S.grindOn) base = poseRail(S.grindStyle);
     else if (air && (S.holding || Math.abs(S.flip) > 0.2 || Math.abs(S.yaw) > 0.2)) {
-      base = poseSpin(true, S.flip + S.yaw, 0, S.spinDir);
+      // Yaw reads as twist/foreshorten; flip rotation is applied in drawRider.
+      base = poseSpin(true, S.yaw + S.flip * 0.35, 0, S.spinDir);
+      if (Math.abs(S.flip) > 0.4) base.knee = Math.max(base.knee, 0.42);
     }
     else if (!air && S.windup > 0.05) base = poseSpin(false, 0, S.windup, S.spinDir);
     if (S.grab && S.grabEase > 0.01 && air) {
@@ -2342,105 +2367,139 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     }
     return base;
   }
-  /** Draw articulated rider at local origin (board ≈ y0). */
-  function paintRider(pose: Pose, bbC: string, bbS: string, opts?: { label?: string; scale?: number }) {
-    const sc = opts?.scale || 1;
-    cx.save();
-    if (sc !== 1) cx.scale(sc, sc);
-    // Board (separate part — tweak / foreshorten / press flex); rises with knee tuck.
-    const tuckLift = Math.max(0, Math.min(1, pose.knee)) * 18;
-    cx.save();
-    cx.translate(pose.press * 6, pose.boardY - tuckLift);
-    cx.rotate(pose.boardRot);
-    cx.scale(Math.max(0.22, pose.boardSX), Math.max(0.55, pose.boardSY));
-    cx.fillStyle = bbC;
-    cx.beginPath();
-    cx.moveTo(-34, -1); cx.lineTo(34, -1); cx.lineTo(31, 7); cx.lineTo(-31, 7);
-    cx.closePath(); cx.fill();
-    // Press flex: slight board bend.
-    if (Math.abs(pose.press) > 0.2) {
-      cx.strokeStyle = bbS; cx.lineWidth = 2;
-      cx.beginPath();
-      cx.moveTo(-28, 2);
-      cx.quadraticCurveTo(0, 2 + pose.press * 5, 28, 2);
-      cx.stroke();
-    } else {
-      cx.fillStyle = bbS; cx.fillRect(-22, 1, 44, 2.5);
+  /** Last composed rig debug (for fail-tests / evidence). */
+  let riderDbg: {
+    profile: boolean; parts: number; mode: string; knee: number; lean: number;
+    torsoW: number; torsoH: number; headFacing: number;
+  } = { profile: false, parts: 0, mode: "none", knee: 0, lean: 0, torsoW: 0, torsoH: 0, headFacing: 0 };
+
+  function armAngle(pose: Pose, which: "l" | "r", shx: number, shy: number) {
+    const tx = which === "l" ? pose.lArmX : pose.rArmX;
+    const ty = which === "l" ? pose.lArmY : pose.rArmY;
+    // Pose arm tips are in the old local system (~board origin). Map roughly into frame space.
+    const fx = 75 + tx * 1.1;
+    const fy = 170 + ty * 1.15;
+    return Math.atan2(fy - shy, fx - shx);
+  }
+
+  /**
+   * Woman3 side-profile cutout rig — Franz shading, joint rotations for motion.
+   * Frame space: ride atlas px, origin top-left; board bottom-center becomes local (0,0).
+   */
+  function paintWoman3Rig(pose: Pose, opts?: { label?: string }) {
+    const img = art.rig;
+    const meta = art.rigMeta;
+    if (!img || !meta) return false;
+    const P = meta.parts;
+    const need = ["board", "bootB", "bootF", "shinB", "shinF", "thighB", "thighF", "armB", "torso", "armF", "head"];
+    for (const n of need) if (!P[n]) return false;
+
+    const knee = Math.max(0, Math.min(1.15, pose.knee));
+    // Rest cutouts already crouch (~0.12). Delta opens (pop) or deepens (absorb/tuck).
+    const kDelta = (knee - 0.12) * 0.85;
+    const hipBend = kDelta * 0.55 + pose.arch * 0.25;
+    const kneeBend = kDelta * 0.95;
+    const torsoLean = pose.lean * 0.55 - pose.arch * 0.4;
+    const headRot = pose.headTilt * 0.5 + pose.headTurn * 0.12;
+    const shB = P.armB!;
+    const shF = P.armF!;
+    const restArmB = Math.atan2(shB.restY + 40 - shB.restY, (shB.restX - 30) - shB.restX);
+    const restArmF = Math.atan2(shF.restY + 42 - shF.restY, (shF.restX + 28) - shF.restX);
+    let armBRot = armAngle(pose, "l", shB.restX, shB.restY) - restArmB;
+    let armFRot = armAngle(pose, "r", shF.restX, shF.restY) - restArmF;
+    armBRot = Math.max(-0.9, Math.min(0.9, armBRot * 0.55 + torsoLean * 0.15));
+    armFRot = Math.max(-0.9, Math.min(0.9, armFRot * 0.55 + torsoLean * 0.1));
+    // Grab: pull leading/trailing arm toward the board.
+    if (S.grab && S.grabEase > 0.05 && !S.p.on) {
+      const g = S.grabEase;
+      if (S.grab === "Indy" || S.grab === "Stalefish" || S.grab === "Tail") armFRot += 0.7 * g;
+      if (S.grab === "Melon" || S.grab === "Mute" || S.grab === "Nose" || S.grab === "Method") armBRot -= 0.65 * g;
+      if (S.grab === "Method") { armFRot += 0.35 * g; }
     }
-    cx.restore();
-    // Bindings + boots — high knee pulls boots up toward the chest (real tuck).
-    const tuck = Math.max(0, Math.min(1, pose.knee));
-    const bootY = -5 - tuck * 22;
-    const st = 11 * pose.stance * (1 - tuck * 0.25);
-    const bootSpread = st * (1 - tuck * 0.35);
-    cx.fillStyle = "#2a2438";
-    cx.fillRect(-bootSpread - 1, bootY, 10, 6); cx.fillRect(bootSpread - 9, bootY, 10, 6);
-    cx.fillStyle = "#1a1828";
-    cx.fillRect(-bootSpread - 1, bootY - 1, 8, 5); cx.fillRect(bootSpread - 7, bootY - 1, 8, 5);
-    // Legs (thigh + shin): knee bends forward/back so tuck reads clearly.
-    const hipY = -28 - pose.arch * 10 - pose.lean * 6 + tuck * 6;
-    const kneeX = tuck * 10;
-    const kneeY = hipY + 8 + (1 - tuck) * 12;
-    cx.strokeStyle = "#2a9a9a"; cx.lineWidth = 8; cx.lineCap = "round";
-    cx.beginPath();
-    cx.moveTo(-st + 4, hipY); cx.lineTo(-st + 4 + kneeX, kneeY); cx.lineTo(-bootSpread + 2, bootY);
-    cx.moveTo(st - 4, hipY); cx.lineTo(st - 4 + kneeX * 0.6, kneeY); cx.lineTo(bootSpread - 2, bootY);
-    cx.stroke();
-    // Torso — arch / lean / twist (width foreshortens with twist)
-    const torsoW = 15 * (0.45 + 0.55 * (1 - Math.abs(pose.twist) * 0.7));
-    const torsoTop = hipY - 24 - pose.arch * 10;
-    const torsoLeanX = pose.lean * 12 + pose.twist * 4;
-    cx.fillStyle = "#1e5a40";
-    cx.beginPath();
-    cx.moveTo(-torsoW + torsoLeanX, torsoTop);
-    cx.lineTo(torsoW + torsoLeanX, torsoTop);
-    cx.lineTo(torsoW + 2 + pose.twist * 3, hipY + 4);
-    cx.lineTo(-torsoW - 2 + pose.twist * 3, hipY + 4);
-    cx.closePath(); cx.fill();
-    cx.strokeStyle = "#8fd96a"; cx.lineWidth = 1.5;
-    cx.strokeRect(-6 + torsoLeanX, torsoTop + 6, 5, 8);
-    cx.strokeRect(1 + torsoLeanX, torsoTop + 6, 5, 8);
-    // Arms (shoulder → hand) as articulated strokes
-    const shY = torsoTop + 8;
-    const shLX = -torsoW + 2 + torsoLeanX;
-    const shRX = torsoW - 2 + torsoLeanX;
-    cx.strokeStyle = "#1e5a40"; cx.lineWidth = 5.5; cx.lineCap = "round";
-    cx.beginPath();
-    cx.moveTo(shLX, shY); cx.lineTo(pose.lArmX, pose.lArmY);
-    cx.moveTo(shRX, shY); cx.lineTo(pose.rArmX, pose.rArmY);
-    cx.stroke();
-    // Hands
-    cx.fillStyle = "#e8b890";
-    cx.beginPath(); cx.arc(pose.lArmX, pose.lArmY, 3.2, 0, 7); cx.arc(pose.rArmX, pose.rArmY, 3.2, 0, 7); cx.fill();
-    // Head + helmet (spots landing via headTurn)
-    const hx = torsoLeanX + pose.headTurn * 8 + pose.twist * 6;
-    const hy = torsoTop - 10 + pose.headTilt * 6;
-    cx.fillStyle = "#1a6a68";
-    cx.beginPath(); cx.arc(hx, hy, 11, 0, 7); cx.fill();
-    cx.fillStyle = "#145854";
-    cx.beginPath(); cx.arc(hx, hy - 3, 9, Math.PI, 0); cx.fill();
-    cx.fillStyle = "#e8b890";
-    cx.beginPath(); cx.ellipse(hx + pose.headTurn * 2, hy + 5, 6, 5, 0, 0, 7); cx.fill();
-    cx.strokeStyle = "#121820"; cx.lineWidth = 2.6; cx.lineCap = "round";
-    cx.beginPath(); cx.arc(hx, hy, 11.2, 0.35, Math.PI - 0.35); cx.stroke();
-    const gw = 18 * (0.55 + 0.45 * (1 - Math.abs(pose.twist) * 0.5));
-    cx.fillStyle = "#1a222c"; cx.fillRect(hx - gw / 2, hy - 3, gw, 8);
-    cx.fillStyle = "#f0a028";
-    cx.fillRect(hx - gw / 2 + 1, hy - 2, gw * 0.4, 6);
-    cx.fillRect(hx + 1, hy - 2, gw * 0.4, 6);
-    cx.strokeStyle = "#0e141c"; cx.lineWidth = 1.1;
-    cx.strokeRect(hx - gw / 2, hy - 3, gw, 8);
+
+    const pxScale = ((RIDE_NATIVE_CSS * spriteG) * (atlasDpr() / scale)) / meta.frameH;
+    cx.save();
+    cx.scale(pxScale, pxScale);
+    // Board bottom-center of the ride frame → local origin.
+    cx.translate(-meta.frameW / 2 + pose.press * 4, -meta.frameH + pose.boardY);
+
+    const drawPart = (part: RigPart, x: number, y: number, rot: number) => {
+      cx.save();
+      cx.translate(x, y);
+      cx.rotate(rot);
+      cx.drawImage(img, part.x, part.y, part.w, part.h, -part.pivotX, -part.pivotY, part.w, part.h);
+      cx.restore();
+    };
+    const rotOffset = (dx: number, dy: number, rot: number) => ({
+      x: dx * Math.cos(rot) - dy * Math.sin(rot),
+      y: dx * Math.sin(rot) + dy * Math.cos(rot),
+    });
+
+    // Board under everything (side profile).
+    const board = P.board!;
+    drawPart(board, board.restX, board.restY, pose.boardRot);
+    // Back leg chain (screen-left / trailing).
+    const hipB = P.thighB!;
+    const shinB = P.shinB!;
+    const bootB = P.bootB!;
+    drawPart(hipB, hipB.restX, hipB.restY, hipBend * 0.85);
+    {
+      const kneeLocal = rotOffset(shinB.restX - hipB.restX, shinB.restY - hipB.restY, hipBend * 0.85);
+      const kx = hipB.restX + kneeLocal.x;
+      const ky = hipB.restY + kneeLocal.y;
+      drawPart(shinB, kx, ky, hipBend * 0.85 + kneeBend);
+      const bootLocal = rotOffset(bootB.restX - shinB.restX, bootB.restY - shinB.restY, hipBend * 0.85 + kneeBend);
+      drawPart(bootB, kx + bootLocal.x, ky + bootLocal.y, hipBend * 0.85 + kneeBend * 0.85);
+    }
+    // Trailing arm behind torso.
+    drawPart(shB, shB.restX, shB.restY, armBRot);
+    // Torso (side profile jacket) + leading leg + leading arm + head.
+    const torso = P.torso!;
+    drawPart(torso, torso.restX, torso.restY, torsoLean);
+    const hipF = P.thighF!;
+    const shinF = P.shinF!;
+    const bootF = P.bootF!;
+    const hipFPos = rotOffset(hipF.restX - torso.restX, hipF.restY - torso.restY, torsoLean);
+    const hfx = torso.restX + hipFPos.x;
+    const hfy = torso.restY + hipFPos.y;
+    drawPart(hipF, hfx, hfy, torsoLean + hipBend);
+    {
+      const kneeLocal = rotOffset(shinF.restX - hipF.restX, shinF.restY - hipF.restY, torsoLean + hipBend);
+      const kx = hfx + kneeLocal.x;
+      const ky = hfy + kneeLocal.y;
+      drawPart(shinF, kx, ky, torsoLean + hipBend + kneeBend);
+      const bootLocal = rotOffset(bootF.restX - shinF.restX, bootF.restY - shinF.restY, torsoLean + hipBend + kneeBend);
+      drawPart(bootF, kx + bootLocal.x, ky + bootLocal.y, torsoLean + hipBend + kneeBend * 0.85);
+    }
+    const armFPos = rotOffset(shF.restX - torso.restX, shF.restY - torso.restY, torsoLean);
+    drawPart(shF, torso.restX + armFPos.x, torso.restY + armFPos.y, torsoLean + armFRot);
+    const head = P.head!;
+    const headPos = rotOffset(head.restX - torso.restX, head.restY - torso.restY, torsoLean);
+    drawPart(head, torso.restX + headPos.x, torso.restY + headPos.y, torsoLean + headRot);
+
+    riderDbg = {
+      profile: !!meta.profile,
+      parts: need.length,
+      mode: !S.p.on && !S.grindOn ? "air" : S.land > 0.2 ? "land" : S.hop > 0.05 ? "pop" : "carve",
+      knee, lean: pose.lean,
+      torsoW: torso.w, torsoH: torso.h,
+      // Head restX > torso restX → looking / leading downhill (+X).
+      headFacing: head.restX - torso.restX,
+    };
+
     if (opts?.label) {
       cx.fillStyle = "rgba(20,12,40,0.72)";
-      cx.fillRect(-42, 16, 84, 16);
+      cx.fillRect(meta.frameW / 2 - 42, meta.frameH + 4, 84, 16);
       cx.fillStyle = "#f4eef8";
       cx.font = "bold 10px ui-sans-serif,system-ui,sans-serif";
       cx.textAlign = "center";
-      cx.fillText(opts.label, 0, 27);
+      cx.fillText(opts.label, meta.frameW / 2, meta.frameH + 15);
     }
     cx.restore();
+    return true;
   }
-  /** Pick Franz rider frame — distinct body pose per trick; tuck/grab not upscaled. */
+
+  /** Franz full-frame fallback (still side-profile Woman3) when rig missing. */
   function riderFrameId(): RiderFrameId {
     if (S.mode === "over") return "crash";
     if (S.grindOn) return "slide";
@@ -2451,60 +2510,49 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
       if (g === "Method") return "method";
       if (g === "Mute") return "mute";
       if (g === "Stalefish") return "stalefish";
-      // Melon / Tail / Nose — no dedicated frame yet; use air tuck.
       return "air";
     }
     if (!S.p.on && !S.grindOn) return "air";
     return "ride";
   }
+
   function drawRider() {
     const p = S.p; const slope = slopeAt(p.x); const hopY = -Math.sin(S.hop * Math.PI) * 10;
-    // Soft contact shadow on snow / rail deck.
     if (p.on || S.grindOn) {
       const sw = (RIDE_NATIVE_CSS * spriteG) * 0.22 * (atlasDpr() / scale);
       contactShadow(p.x, p.y + 2, sw, 3.2, S.grindOn ? 0.32 : 0.26);
     }
     cx.save();
     cx.translate(p.x, p.y + hopY);
-    // Rider v2 faces +X (downhill) as authored — no facing mirror.
-    if (artOk() && art.rider) {
+    // Side-profile faces +X / downhill. Pitch follows slope / air; flip tumbles for readable backflips.
+    let pitch = p.on || S.grindOn
+      ? slope * 0.85 + (S.grindOn ? (S.grindStyle === "nose" ? -0.12 : S.grindStyle === "tail" ? 0.12 : S.grindStyle === "boardslide" || S.grindStyle === "lipslide" ? 0.04 : 0.04) : 0)
+      : Math.max(-0.25, Math.min(0.35, -p.vy / 2200));
+    if (!p.on && !S.grindOn && Math.abs(S.flip) > 0.15) pitch += S.flip;
+    cx.rotate(pitch);
+    if (S.mode === "over") { cx.translate(0, 4); cx.rotate(0.9); }
+    const unit = (RIDE_NATIVE_CSS * spriteG) * (atlasDpr() / scale);
+    if (S.grindOn) cx.translate(0, unit * 0.04);
+    else if (p.on) cx.translate(0, -unit * 0.06);
+
+    const pose = currentPose();
+    let painted = false;
+    // Big flips: full Woman3 frame stays readable when inverted; cutouts for carve/pop/tuck/land/grabs.
+    const bigFlip = !p.on && !S.grindOn && Math.abs(S.flip) > 0.55 && !!art.rider;
+    if (!bigFlip && art.rig && art.rigMeta) painted = paintWoman3Rig(pose);
+    if (!painted && art.rider) {
       const fr = RIDER_FRAMES[riderFrameId()];
-      let rot = 0;
-      if (S.mode === "over") rot = -0.9;
-      else if (S.grindOn) {
-        // Board snapped to rail: pitch follows deck; boardslide faces across.
-        rot = slope * 0.55 + (S.grindStyle === "nose" ? -0.1 : S.grindStyle === "tail" ? 0.1 : S.grindStyle === "boardslide" || S.grindStyle === "lipslide" ? 0.04 : 0.02);
-      } else if (p.on) rot = slope * 0.85;
-      else {
-        rot = Math.max(-0.25, Math.min(0.35, -p.vy / 2200));
-        if (Math.abs(S.flip) > 0.25 || Math.abs(S.yaw) > 0.25) rot += S.flip + S.yaw;
-      }
-      cx.rotate(rot);
-      // Grind: nest into rail top. Snow: lift so the board sole sits on the crest (not sunk through it).
-      const unit = (RIDE_NATIVE_CSS * spriteG) * (atlasDpr() / scale);
-      if (S.grindOn) cx.translate(0, unit * 0.04);
-      else if (p.on) cx.translate(0, -unit * 0.09);
-      // Dark rim / soft outline so the rider reads in front of the tree band.
-      cx.save();
-      cx.shadowColor = "rgba(6,2,18,0.95)";
-      cx.shadowBlur = 8;
-      cx.shadowOffsetX = 0;
-      cx.shadowOffsetY = 1.8;
-      drawAtlasFrame(cx, art.rider, fr, 0, 0, atlasDpr(), scale, spriteG, 1);
-      cx.restore();
-    } else {
-      let pitch = p.on || S.grindOn
-        ? slope + (S.grindOn ? (S.grindStyle === "nose" ? -0.12 : S.grindStyle === "tail" ? 0.12 : 0.04) : 0)
-        : Math.max(-0.2, Math.min(0.35, -p.vy / 2200));
-      if (!p.on && !S.grindOn && (Math.abs(S.flip) > 0.25 || Math.abs(S.yaw) > 0.25)) {
-        pitch += Math.sin(S.flip + S.yaw) * 0.08;
-      }
-      cx.rotate(pitch);
-      if (S.mode === "over") { cx.translate(0, 4); cx.rotate(0.9); }
-      const BB = board();
-      paintRider(currentPose(), BB.c, BB.s);
+      drawAtlasFrame(cx, art.rider, fr, 0, 0, atlasDpr(), scale, spriteG, 1, 0);
+      riderDbg = {
+        profile: true, parts: bigFlip ? 11 : 1, mode: bigFlip ? "flip" : riderFrameId(), knee: pose.knee, lean: pose.lean,
+        torsoW: fr.w * 0.45, torsoH: fr.h * 0.4, headFacing: 12,
+      };
+      painted = true;
     }
-    // Boost jets aft of the board (local −X while facing +X).
+    if (!painted) {
+      // Last-resort: still mark debug so fail-tests catch missing art.
+      riderDbg = { profile: false, parts: 0, mode: "missing", knee: pose.knee, lean: pose.lean, torsoW: 0, torsoH: 0, headFacing: 0 };
+    }
     if (!p.on && S.boostT > 0) {
       cx.fillStyle = "rgba(255,120,40,0.55)";
       for (let i = 0; i < 4; i++) cx.fillRect(-6 - i * 3, 8 + i * 4, 4, 6);
@@ -2532,8 +2580,7 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     cx.fillText("Terrain Park — Trick Pose QA", 16, 28);
     cx.font = "12px ui-sans-serif,system-ui,sans-serif";
     cx.fillStyle = "#c8b8d8";
-    cx.fillText("Articulated rider · original poses · not a game copy", 16, 46);
-    const BB = board();
+    cx.fillText("Woman3 side-profile cutout rig · Franz shading", 16, 46);
     type Cell = { lab: string; pose: Pose };
     const grabs: Cell[] = (["Indy", "Melon", "Mute", "Stalefish", "Method", "Tail", "Nose"] as NonNullable<GrabId>[]).map((g) => ({ lab: g, pose: poseGrab(g) }));
     const rails: Cell[] = [
@@ -2569,8 +2616,12 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
         cx.fillStyle = "rgba(255,255,255,0.06)";
         cx.fillRect(cx0 - cellW / 2 + 4, cy0 - 70, cellW - 8, 138);
         cx.save();
-        cx.translate(cx0, cy0);
-        paintRider(cell.pose, BB.c, BB.s, { label: cell.lab, scale: 1.15 });
+        cx.translate(cx0, cy0 + 36);
+        // Temporary spriteG so the rig paints at a readable sheet size.
+        const prevG = spriteG;
+        spriteG = 1.35;
+        paintWoman3Rig(cell.pose, { label: cell.lab });
+        spriteG = prevG;
         cx.restore();
       });
       const rowsUsed = Math.ceil(n / 4);
@@ -2735,27 +2786,43 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
 
     treeDbg = [];
     fgDbg = [];
-    // Sparse scenery: at most 1–2 full-detail atlas pines (never a dense mid-row).
+    // Sparse scenery: world-fixed pines (scroll 1:1 with snow). Never welded to the rider.
+    // At most 1–2 full-detail atlas pines per screen; sit on BASE slope (snowY), never on features.
     {
       const maxPines = landscape ? 1 : 2;
-      const detailPer = landscape ? 520 : 420;
-      const detailOff = (S.dist * 0.22) % detailPer;
+      const spacing = landscape ? 520 : 400;
+      const wLeft = S.dist + viewL - S.p.x;
+      const wRight = S.dist + viewR - S.p.x;
+      const slot0 = Math.floor(wLeft / spacing) * spacing;
       let drawn = 0;
-      for (let c = -1; c <= 4 && drawn < maxPines; c++) {
-        const x = 90 + c * detailPer - detailOff;
-        if (x < viewL - 10 || x > viewR + 10) continue;
-        const wx = S.dist + x - S.p.x;
-        if (featBlocksTree(wx)) continue;
-        if (Math.abs(x - S.p.x) < 100) continue;
-        const tallPick = ((Math.floor(wx / detailPer) % 2) === 0);
+      const tryPine = (wx: number, tallPick: boolean) => {
+        if (featBlocksTree(wx)) return false;
+        const x = wx - S.dist + S.p.x;
+        if (x < viewL - 10 || x > viewR + 10) return false;
+        // Keep clear of the rider sprite; pines behind the rider are fine.
+        if (x > S.p.x - 36 && x < S.p.x + 120) return false;
         pine(x, snowY(x) + 10, tallPick ? 0.86 : 0.72, "mid", true, tallPick);
-        drawn++;
+        return true;
+      };
+      for (let wx0 = slot0 - spacing; wx0 <= wRight + spacing && drawn < maxPines; wx0 += spacing) {
+        let wx = wx0 + (((Math.floor(wx0 / spacing) % 5) - 2) * 18);
+        const tallPick = (Math.floor(wx0 / spacing) % 2) === 0;
+        if (featBlocksTree(wx)) {
+          let shifted = false;
+          for (const d of [90, -90, 150, -150, 220, -220]) {
+            if (!featBlocksTree(wx0 + d)) { wx = wx0 + d; shifted = true; break; }
+          }
+          if (!shifted) continue;
+        }
+        if (tryPine(wx, tallPick)) drawn++;
       }
-      // Portrait only: if none survived culling, place a single pine off the rider —
-      // landscape stays on the resort plate alone when empty.
-      if (drawn === 0 && !landscape) {
-        const x = Math.min(viewR - 70, Math.max(viewL + 70, S.p.x + 170));
-        pine(x, snowY(x) + 10, 0.78, "mid", true, true);
+      // Fill from clear world gaps if slot grid was fully blocked — still world-x, never S.p.x+const.
+      if (drawn === 0) {
+        const step = 48;
+        const start = Math.floor(wLeft / step) * step;
+        for (let wx = start; wx <= wRight && drawn < maxPines; wx += step) {
+          if (tryPine(wx, (Math.floor(wx / spacing) % 2) === 0)) drawn++;
+        }
       }
     }
     // Ride surface — clean white / blue-white snow; covers mid-tree bases.
@@ -3226,6 +3293,8 @@ export function createGame(canvas: HTMLCanvasElement, onSnap: (s: Snap) => void)
     resize,
     /** True when Franz rider+world atlases loaded (else vector fallback). */
     artReady: () => artOk(),
+    /** Woman3 cutout-rig debug for profile / articulation fail-tests. */
+    getRiderDebug: () => { draw(); return { ...riderDbg, hasRig: !!(art.rig && art.rigMeta) }; },
     setOverview(on: boolean) { overviewCam = !!on; resize(); draw(); },
     getTrees: () => { draw(); return treeDbg.slice(); },
     getFgDecor: () => { draw(); return fgDbg.slice(); },

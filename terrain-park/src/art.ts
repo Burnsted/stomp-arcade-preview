@@ -62,6 +62,8 @@ export const BG_W = 780;
 export const BG_H = 520;
 
 const RIDER_SRC = "./assets/rider-atlas@2x.webp";
+const RIDER_RIG_SRC = "./assets/rider-rig@2x.webp";
+const RIDER_RIG_JSON = "./assets/rider-rig.json";
 const WORLD_SRC = "./assets/world-atlas@2x.webp";
 const GROM_SRC = "./assets/grom-atlas@2x.webp";
 const KICKER_SRC = "./assets/kicker@2x.webp";
@@ -71,9 +73,28 @@ const BG_SRC: Record<BackdropId, string> = {
   night: "./assets/bg-night.webp",
 };
 
+/** One cutout layer from Woman3 ride (atlas px + rest pose in ride-frame px). */
+export type RigPart = {
+  x: number; y: number; w: number; h: number;
+  pivotX: number; pivotY: number;
+  restX: number; restY: number;
+};
+
+/** Woman3 side-profile cutout rig metadata (derived from approved ride frame). */
+export type RiderRigMeta = {
+  src: string;
+  frameW: number;
+  frameH: number;
+  profile: boolean;
+  parts: Record<string, RigPart>;
+};
+
 export type ArtKit = {
   ready: boolean;
   rider: HTMLImageElement | null;
+  /** Cutout layers for articulated Woman3 side-profile rig. */
+  rig: HTMLImageElement | null;
+  rigMeta: RiderRigMeta | null;
   world: HTMLImageElement | null;
   /** Franz kid obstacle atlas (sit + ride). */
   grom: HTMLImageElement | null;
@@ -93,6 +114,16 @@ function loadImg(src: string): Promise<HTMLImageElement | null> {
     img.onerror = () => resolve(null);
     img.src = src;
   });
+}
+
+async function loadJson<T>(src: string): Promise<T | null> {
+  try {
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -135,8 +166,10 @@ function rememberSky(kit: ArtKit, id: BackdropId, img: HTMLImageElement | null) 
 export async function loadArt(primary: BackdropId = "bluebird"): Promise<ArtKit> {
   // Primary backdrop only on first paint. Night (or the other look) loads on
   // demand via ensureBackdrop — keeps first-load under Ted's ~350 KB gzip budget.
-  const [rider, world, grom, kickerWebp, first] = await Promise.all([
+  const [rider, rig, rigMeta, world, grom, kickerWebp, first] = await Promise.all([
     loadImg(RIDER_SRC),
+    loadImg(RIDER_RIG_SRC),
+    loadJson<RiderRigMeta>(RIDER_RIG_JSON),
     loadImg(WORLD_SRC),
     loadImg(GROM_SRC),
     loadImg(KICKER_SRC),
@@ -144,8 +177,10 @@ export async function loadArt(primary: BackdropId = "bluebird"): Promise<ArtKit>
   ]);
   const kicker = kickerWebp || await loadImg(KICKER_FALLBACK_SRC);
   const kit: ArtKit = {
-    ready: !!(rider && world),
+    ready: !!((rig && rigMeta) || rider) && !!world,
     rider,
+    rig: rig && rigMeta ? rig : null,
+    rigMeta: rig && rigMeta ? rigMeta : null,
     world,
     grom,
     kicker,
