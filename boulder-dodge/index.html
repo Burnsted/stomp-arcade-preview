@@ -7,7 +7,7 @@
 <title>Boulder Dodge</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{width:100%;height:100%;overflow:hidden;background:#1a4060;touch-action:none;font-family:system-ui,sans-serif}
+html,body{width:100%;height:100%;overflow:hidden;background:#d6e4f0;touch-action:none;font-family:system-ui,sans-serif}
 canvas{display:block;width:100%;height:100%}
 #ui{position:fixed;inset:0;pointer-events:none;z-index:2}
 #ui button{pointer-events:auto;border:0;cursor:pointer}
@@ -59,7 +59,9 @@ canvas{display:block;width:100%;height:100%}
 <script>
 (function(){
 'use strict';
-var VER='0.9.42-title-locker';
+var VER='0.9.54-ship-qa';
+/* Resort backdrop: 1 dense Alto-face (ship), 2 mid density, 3 extra trail/lodge detail */
+var RESORT_STYLE=1;
 var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 var W=390,H=844,scale=1,OY=0,dpr=1;
 var GROUND=268,G=3400,JV=-980,DT=1/120;
@@ -107,24 +109,32 @@ function makeChart(src){
   for(i=0;i<src.length;i++){p=src[i].split(':');c.push({x:Math.round(x),t:CHART_MAP[p[0]]});x+=bu*parseFloat(p[1]);}
   return{chart:c,len:Math.round(x+bu*1.4)};
 }
-/* Per-level palette: slope/snow/light/fog/particles/rock tint — GD identity */
+/* Per-level resort zone + painted palette (no photo plates). forest = [far,mid,near] conifer tones */
 var LEVELS=[
-  {id:'L1',name:'Rocky Ridge',tag:'First Tracks',bg:'bg-rocky-ridge.webp',chartKind:'ridge',
-    sky:['#8eb4d4','#b7cfe4','#e2eef6'],snow:'#eef3f8',shade:'#8fa8bc',tint:'#d5e2ec',
+  {id:'L1',name:'First Tracks',tag:'Base Lodge',chartKind:'ridge',zone:'base',
+    sky:['#7aa8cc','#b0cfe6','#e4f0f8'],snow:'#eef3f8',shade:'#8fa8bc',tint:'#d5e2ec',
     rock:['#5e6a76','#7e8a96','#a4b0bc'],rockRim:'#d7e2ea',
-    light:[-0.55,-0.72],fog:[180,200,214],pt:'fine',flakes:16},
-  {id:'L2',name:'Open Snowfield',tag:'Wide White',bg:'bg-open-snowfield.webp',chartKind:'field',
-    sky:['#b8d4ec','#d8e8f6','#f4f9fd'],snow:'#fbfcfe',shade:'#c0d4e4',tint:'#eef5fb',
+    far:['#a8c0d2','#c4d6e4'],midSnow:['#d8e6f0','#c0d2e0'],
+    forest:['#2a4a38','#3d6a4e','#5a8a68'],near:['#3e5e4c','#d6e6f0'],
+    light:[-0.55,-0.72],fog:[196,214,226],pt:'fine',flakes:16},
+  {id:'L2',name:'Wide White',tag:'Mid Mountain',chartKind:'field',zone:'groomer',
+    sky:['#a8c8e8','#d0e4f4','#f2f8fc'],snow:'#fbfcfe',shade:'#c0d4e4',tint:'#eef5fb',
     rock:['#7a8692','#9aa6b0','#c2ccd4'],rockRim:'#f2f7fb',
-    light:[-0.12,-0.98],fog:[232,242,250],pt:'big',flakes:28},
-  {id:'L3',name:'Frozen Lake',tag:'Glass Run',bg:'bg-frozen-lake.webp',chartKind:'lake',
-    sky:['#2f78b4','#6aa8d0','#c4e2f2'],snow:'#d4eef8',shade:'#5e92b0',tint:'#aed4e6',
+    far:['#c0d4e4','#dde8f0'],midSnow:['#eef6fb','#d4e4f0'],
+    forest:['#355848','#4e7a60','#6a9878'],near:['#4e6e5c','#eaf3f8'],
+    light:[-0.12,-0.98],fog:[236,244,250],pt:'big',flakes:28},
+  {id:'L3',name:'Glass Run',tag:'Lakeside',chartKind:'lake',zone:'lake',
+    sky:['#2a6eaa','#5a9cc8','#b8dcec'],snow:'#d4eef8',shade:'#5e92b0',tint:'#aed4e6',
     rock:['#3e5e72','#5e8296','#8eb0c2'],rockRim:'#c4e8f6',
-    light:[-0.72,-0.5],fog:[120,180,205],pt:'glint',flakes:14},
-  {id:'L4',name:'Alpine Bowl',tag:'Dusk Bowl',bg:'bg-alpine-bowl.webp',chartKind:'bowl',
-    sky:['#6a88b8','#c4a890','#f0d8c0'],snow:'#faf2f5',shade:'#6f87b2',tint:'#cfd6e8',
+    far:['#5a8aac','#8eb8d0'],midSnow:['#c8e4f0','#a8cce0'],
+    forest:['#1e4034','#2f5e48','#457a60'],near:['#2e5244','#c0dcec'],
+    light:[-0.72,-0.5],fog:[140,190,210],pt:'glint',flakes:14},
+  {id:'L4',name:'Dusk Bowl',tag:'Summit Light',chartKind:'bowl',zone:'bowl',
+    sky:['#5a78a8','#b8a0b0','#e8d8e0'],snow:'#f4f0f6',shade:'#6f87b2',tint:'#cfd6e8',
     rock:['#6a6578','#8a8496','#b0a8b6'],rockRim:'#f2e4ec',
-    light:[0.35,-0.85],fog:[186,192,218],pt:'ember',flakes:22}
+    far:['#7a8098','#b8a8b4'],midSnow:['#e8dce8','#c8c0d0'],
+    forest:['#2e3834','#44504a','#5e6a62'],near:['#3e4844','#e0d4e4'],
+    light:[0.35,-0.85],fog:[198,200,220],pt:'ember',flakes:22}
 ];
 LEVELS.forEach(function(L){var m=makeChart(CHART_SRC[L.chartKind]);L.chart=m.chart;L.len=m.len;});
 var L1_LEN=LEVELS[0].len;
@@ -135,7 +145,8 @@ function curLen(){return curLevel().len||L1_LEN;}
 function levelLook(){
   var L=curLevel();
   return{snow:L.snow,shade:L.shade,tint:L.tint,light:L.light,flakes:L.flakes,pt:L.pt,
-    rock:L.rock,rockRim:L.rockRim,fog:L.fog,tag:L.tag};
+    rock:L.rock,rockRim:L.rockRim,fog:L.fog,tag:L.tag,zone:L.zone,
+    far:L.far,midSnow:L.midSnow,forest:L.forest,near:L.near,sky:L.sky};
 }
 
 /* Unlockable boards + rider looks (colorways) — earn by clearing levels / stars */
@@ -236,31 +247,14 @@ function bootArt(){
     ART.ok=!!atlas;
     if(atlas.frames.ride)RIDER_ATLAS_H=atlas.frames.ride.h;
     if(S)S.obs=buildObs();
-    ensureBackdrop(curLevel().bg);
-    preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   }).catch(function(err){ART.ok=false;console&&console.warn('BD art fallback',err);});
 }
-function ensureBackdrop(file){
-  if(!file||ART.bg[file]||ART.bgLoading[file])return ART.bgLoading[file]||Promise.resolve(ART.bg[file]||null);
-  ART.bgLoading[file]=loadImg(ART_CFG.dir+file).then(function(img){
-    ART.bg[file]=img;delete ART.bgLoading[file];return img;
-  }).catch(function(err){
-    delete ART.bgLoading[file];console&&console.warn('BD backdrop',file,err);return null;
-  });
-  return ART.bgLoading[file];
-}
-function preloadBackdrop(file){
-  if(!file||ART.bg[file]||ART.bgLoading[file])return;
-  /* cheap idle preload of next level backdrop */
-  var run=function(){ensureBackdrop(file);};
-  if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:1200});
-  else setTimeout(run,400);
-}
+/* Plates removed — resort is procedural painted layers (no first-load webp) */
+function ensureBackdrop(){return Promise.resolve(null);}
+function preloadBackdrop(){}
 function setLevel(i){
   levelIdx=((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length;
   try{localStorage.setItem('bd9.lvl',levelIdx)}catch(e){}
-  ensureBackdrop(curLevel().bg);
-  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
 }
 /* Rolling downhill: world rolls + screen-space pitch so the run reads downhill without camera tilt */
 function terr(wx){
@@ -443,41 +437,88 @@ function measureRigPixels(pose){
 }
 
 /* Painted rocks: seat on slope normal + bury/AO/shadow. No photo texture. */
+function rockPoly(pts){
+  cx.beginPath();cx.moveTo(pts[0][0],pts[0][1]);
+  for(var i=1;i<pts.length;i++)cx.lineTo(pts[i][0],pts[i][1]);
+  cx.closePath();
+}
+function rockOutline(rw,rh,bury,s){
+  /* 6–9 verts from 7ec0aef v2 chunk + seed jitter. Flat top + taller shoulder; y=0 is slope. */
+  var n=6+(s%4),j=function(k,a,b){return a+hash01(s*17+k)*(b-a);};
+  var y0=-rh*0.34+bury*0.4; /* 7ec0aef body center relative to slope */
+  var pts=[
+    [-rw*j(1,0.42,0.50),y0+rh*j(2,0.28,0.36)],
+    [-rw*j(3,0.46,0.54),y0-rh*j(4,0.0,0.1)],
+    [-rw*j(5,0.22,0.32),y0-rh*j(6,0.22,0.3)], /* inset notch — keeps silhouette chunky */
+    [-rw*j(7,0.06,0.16),y0-rh*j(8,0.34,0.4)],
+    [rw*j(9,0.0,0.1),y0-rh*j(10,0.38,0.44)], /* flat top */
+    [rw*j(11,0.14,0.24),y0-rh*j(12,0.5,0.58)], /* taller shoulder peak */
+    [rw*j(13,0.36,0.46),y0-rh*j(14,0.08,0.18)], /* sharp drop */
+    [rw*j(15,0.42,0.52),y0+rh*j(16,0.1,0.2)],
+    [rw*j(17,0.16,0.28),y0+rh*j(18,0.3,0.38)],
+    [-rw*j(19,0.24,0.36),y0+rh*j(20,0.32,0.4)]
+  ];
+  if(n===6)return [pts[0],pts[2],pts[3],pts[5],pts[7],pts[9]];
+  if(n===7)return [pts[0],pts[1],pts[2],pts[3],pts[5],pts[7],pts[9]];
+  if(n===8)return [pts[0],pts[1],pts[2],pts[3],pts[4],pts[5],pts[7],pts[9]];
+  return [pts[0],pts[1],pts[2],pts[3],pts[4],pts[5],pts[6],pts[7],pts[9]];
+}
 function drawBoulder(x,gy,w,h,seed){
-  var look=levelLook(),cols=look.rock,rim=look.rockRim,sn=look.snow,tn=look.tint;
-  var cx0=x+w/2,ang=slopeAt(cx0),s=seed|0,L=look.light,bury=Math.max(6,h*0.3);
-  var hx=L[0],hy=L[1],v=ROCK_PAINT|0,y0=-h*0.34+bury*0.4;
+  /* Paint 1 (7ec0aef base): angular silhouette + soft 3-band + sky rim. Bury from slope y — no dome clip. */
+  var look=levelLook(),cols=look.rock,rim=look.rockRim||'#e8f0f6',sn=look.snow,tn=look.tint;
+  var cx0=x+w/2,ang=slopeAt(cx0),s=seed|0,L=look.light||[-0.5,-0.7];
+  var hx=L[0],hy=L[1];
+  var aspect=1.45+(s%5)*0.07; /* 1.45–1.73 wider-than-tall */
+  var rw=Math.min(w,h*aspect)*0.96,rh=rw/aspect;
+  var bury=rh*(0.42+(s%3)*0.03); /* bottom 42–48% under slope snow */
+  var body=rockOutline(rw,rh,bury,s),i,cxb=0,cyb=0;
+  for(i=0;i<body.length;i++){cxb+=body[i][0];cyb+=body[i][1];}
+  cxb/=body.length;cyb/=body.length;
   cx.save();cx.translate(cx0,gy);cx.rotate(ang);
   if(s%2)cx.scale(-1,1);
-  /* downhill contact shadow + AO */
-  cx.fillStyle='rgba(40,60,80,.2)';cx.beginPath();cx.ellipse(w*0.1,2.5,w*0.4,h*0.11,0.04,0,7);cx.fill();
-  cx.fillStyle='rgba(30,50,70,.12)';cx.beginPath();cx.ellipse(0,3,w*0.36,h*0.07,0,0,7);cx.fill();
-  if(v===2){
-    /* soft facet bands */
-    cx.fillStyle=cols[0];cx.beginPath();cx.moveTo(-w*0.42,y0+h*0.28);cx.lineTo(-w*0.2,y0-h*0.32);cx.lineTo(w*0.08,y0-h*0.38);cx.lineTo(w*0.4,y0+h*0.1);cx.lineTo(w*0.22,y0+h*0.32);cx.lineTo(-w*0.3,y0+h*0.34);cx.closePath();cx.fill();
-    cx.fillStyle=cols[1];cx.beginPath();cx.moveTo(-w*0.18,y0-h*0.28);cx.lineTo(w*0.05,y0-h*0.36);cx.lineTo(w*0.28,y0+h*0.02);cx.lineTo(w*0.02,y0+h*0.18);cx.closePath();cx.fill();
-    cx.fillStyle=cols[2];cx.beginPath();cx.ellipse(hx*w*0.16,y0+hy*h*0.12-h*0.08,w*0.16,h*0.12,0,0,7);cx.fill();
-  }else if(v===3){
-    /* warmer rim emphasis */
-    cx.fillStyle=cols[0];cx.beginPath();cx.ellipse(0,y0,w*0.44,h*0.36,0.08,0,7);cx.fill();
-    cx.fillStyle=cols[1];cx.beginPath();cx.ellipse(-w*0.06,y0-h*0.04,w*0.34,h*0.28,-0.05,0,7);cx.fill();
-    cx.fillStyle=rim;cx.globalAlpha=.55;cx.beginPath();cx.ellipse(hx*w*0.2,y0+hy*h*0.18-h*0.06,w*0.2,h*0.14,0,0,7);cx.fill();cx.globalAlpha=1;
-    cx.fillStyle=cols[2];cx.beginPath();cx.ellipse(hx*w*0.12,y0+hy*h*0.1-h*0.1,w*0.14,h*0.1,0,0,7);cx.fill();
-  }else{
-    /* v1 soft 3-band ellipses + sky rim — best slope match */
-    cx.fillStyle=cols[0];cx.beginPath();cx.ellipse(0,y0,w*0.45,h*0.37,0.06,0,7);cx.fill();
-    cx.fillStyle=cols[1];cx.beginPath();cx.ellipse(-w*0.05,y0-h*0.02,w*0.36,h*0.28,-0.04,0,7);cx.fill();
-    cx.fillStyle=cols[2];cx.beginPath();cx.ellipse(hx*w*0.14,y0+hy*h*0.12-h*0.08,w*0.18,h*0.13,0,0,7);cx.fill();
-    cx.fillStyle=rim;cx.globalAlpha=.4;cx.beginPath();cx.ellipse(hx*w*0.18,y0+hy*h*0.2-h*0.12,w*0.2,h*0.1,0,0,7);cx.fill();cx.globalAlpha=1;
+  /* downhill contact shadow + AO (7ec0aef) */
+  cx.fillStyle='rgba(40,60,80,.2)';cx.beginPath();cx.ellipse(rw*0.1,2.5,rw*0.42,rh*0.12,0.04,0,7);cx.fill();
+  cx.fillStyle='rgba(30,50,70,.12)';cx.beginPath();cx.ellipse(0,3,rw*0.36,rh*0.08,0,0,7);cx.fill();
+  /* base band — full angular body */
+  cx.fillStyle=cols[0];rockPoly(body);cx.fill();
+  /* soft 3-band + sky rim clipped to angular silhouette (never round the outline) */
+  cx.save();rockPoly(body);cx.clip();
+  cx.fillStyle=cols[1];
+  cx.beginPath();
+  /* mid facet plane — 4 verts across the lit shoulder (7ec0aef v2 language) */
+  cx.moveTo(cxb-rw*0.22,cyb-rh*0.22);cx.lineTo(cxb+rw*0.06,cyb-rh*0.32);
+  cx.lineTo(cxb+rw*0.28,cyb+rh*0.02);cx.lineTo(cxb+rw*0.02,cyb+rh*0.16);cx.closePath();cx.fill();
+  cx.fillStyle=cols[2];cx.beginPath();cx.ellipse(hx*rw*0.14,cyb+hy*rh*0.1-rh*0.04,rw*0.12,rh*0.09,0,0,7);cx.fill();
+  cx.fillStyle=rim;cx.globalAlpha=.42;cx.beginPath();cx.ellipse(hx*rw*0.16,cyb+hy*rh*0.14-rh*0.1,rw*0.14,rh*0.07,0,0,7);cx.fill();cx.globalAlpha=1;
+  /* snow cap follows top facets (not an oval blob) */
+  var topPts=[];
+  for(i=0;i<body.length;i++)if(body[i][1]< -bury*0.35)topPts.push(body[i]);
+  if(topPts.length>=2){
+    cx.fillStyle=sn;cx.beginPath();
+    cx.moveTo(topPts[0][0],topPts[0][1]+rh*0.01);
+    for(i=1;i<topPts.length;i++)cx.lineTo(topPts[i][0],topPts[i][1]+rh*0.01);
+    for(i=topPts.length-1;i>=0;i--)cx.lineTo(topPts[i][0]*0.82,topPts[i][1]+rh*0.14);
+    cx.closePath();cx.fill();
+    cx.fillStyle=tn;cx.globalAlpha=.8;cx.beginPath();
+    cx.moveTo(topPts[0][0]*0.9,topPts[0][1]+rh*0.05);
+    for(i=1;i<topPts.length;i++)cx.lineTo(topPts[i][0]*0.9,topPts[i][1]+rh*0.05);
+    for(i=topPts.length-1;i>=0;i--)cx.lineTo(topPts[i][0]*0.65,topPts[i][1]+rh*0.16);
+    cx.closePath();cx.fill();cx.globalAlpha=1;
   }
-  /* snow cap blends into slope tint */
-  cx.fillStyle=sn;cx.beginPath();cx.ellipse(-w*0.05,y0-h*0.28,w*0.26,h*0.1,0.05,0,7);cx.fill();
-  cx.fillStyle=tn;cx.globalAlpha=.85;cx.beginPath();cx.ellipse(w*0.08,y0-h*0.18,w*0.16,h*0.07,-0.15,0,7);cx.fill();cx.globalAlpha=1;
-  /* uphill snow-drift lip — rock sits IN the snow */
+  cx.restore();
+  /* snow drift from slope y=0 — tight lip up both sides (not a separate dome mound) */
   cx.fillStyle=sn;
-  cx.beginPath();cx.moveTo(-w*0.58,5);cx.quadraticCurveTo(-w*0.35,-h*0.18, -w*0.05,1);
-  cx.quadraticCurveTo(-w*0.2,7,-w*0.55,8);cx.closePath();cx.fill();
-  cx.fillStyle=tn;cx.beginPath();cx.moveTo(-w*0.5,4);cx.quadraticCurveTo(-w*0.28,-h*0.1,-w*0.08,2);cx.quadraticCurveTo(-w*0.22,6,-w*0.48,6);cx.fill();
+  cx.beginPath();
+  cx.moveTo(-rw*0.52,5);
+  cx.quadraticCurveTo(-rw*0.32,-bury*0.32,-rw*0.04,0);
+  cx.quadraticCurveTo(rw*0.2,-bury*0.26,rw*0.4,1);
+  cx.quadraticCurveTo(rw*0.48,5,rw*0.22,8);
+  cx.lineTo(-rw*0.38,9);cx.closePath();cx.fill();
+  cx.fillStyle=tn;
+  cx.beginPath();
+  cx.moveTo(-rw*0.42,4);
+  cx.quadraticCurveTo(-rw*0.14,-bury*0.2,rw*0.12,1);
+  cx.quadraticCurveTo(rw*0.24,5,-rw*0.06,7);cx.closePath();cx.fill();
   cx.restore();
 }
 function drawKicker(x,gy,w,h){
@@ -527,17 +568,12 @@ function drawGrom(o,ox,gy){
 }
 
 function drawPine(x,gy,kind){
-  /* upright full-detail atlas pines — tall/small native only */
-  var nm=(kind==='tall'||kind===1)?'pine_tall':'pine_small';
-  if(ART.ok&&drawArt(nm,x,gy,null))return;
-  var sc=(typeof kind==='number')?kind:(kind==='tall'?2.1:1.55);
-  sc=sc*worldRiderH()/58;
-  cx.save();cx.translate(x,gy);cx.scale(sc,sc);
-  cx.fillStyle='#1f4036';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(18,-24);cx.lineTo(9,-24);cx.lineTo(20,-6);cx.lineTo(-20,-6);cx.lineTo(-9,-24);cx.lineTo(-18,-24);cx.closePath();cx.fill();
-  cx.fillStyle='#2f5a48';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(11,-30);cx.lineTo(-11,-30);cx.closePath();cx.fill();
-  cx.fillStyle='#e8f0f6';cx.globalAlpha=.8;cx.beginPath();cx.moveTo(0,-58);cx.lineTo(7,-42);cx.lineTo(-7,-42);cx.closePath();cx.fill();cx.globalAlpha=1;
-  cx.fillStyle='#5a3a22';cx.fillRect(-2.5,-6,5,9);
-  cx.restore();
+  /* painted conifer — same language as mid forest (no flocked atlas pine) */
+  var look=levelLook(),tall=(kind==='tall'||kind===1);
+  var h=(tall?52:36)*worldRiderH()/85;
+  var forest=look.forest||['#2a4a38','#3d6a4e','#5a8a68'];
+  drawConifer(x,gy,h,forest[tall?1:2],look.tint||look.snow||'#eef3f8',1);
+  if(tall)drawConifer(x+h*0.22,gy+2,h*0.62,forest[2],look.snow||'#eef3f8',1);
 }
 /* Feature span check — pines never seat on jump / kicker / boulder / gap */
 function pineBlocked(wx){
@@ -666,8 +702,6 @@ function setSeed(n){
 }
 function reset(keepAttempts){
   if(!keepAttempts){attempts=0;lives=LIVES_MAX;}
-  ensureBackdrop(curLevel().bg);
-  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   var rx=rideX();
   S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0,titleT:1.5,
     spinDeg:0,spinTarget:0,spinBoost:false,spinActive:false,trickPts:0,nearPts:0,
@@ -858,90 +892,469 @@ function step(dt){
   }
 }
 
-/* —— scene (resort backdrop + sparse FG pines) —— */
+/* —— painted in-world resort (world-fixed parallax; Alto / GMA face fill) —— */
 function drawSky(){
-  var sky=(curLevel().sky)||THEME.sky;
-  var g=cx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,sky[0]);g.addColorStop(0.55,sky[1]);g.addColorStop(1,sky[2]);
-  cx.fillStyle=g;cx.fillRect(0,0,W,H);
-  /* soft sun only on bright day themes — skipped while backdrop covers */
-  if(!ART.bg[curLevel().bg]&&levelIdx===0){
-    var sx=W*0.78,sy=50-OY*0.08;
-    cx.fillStyle='rgba(255,236,180,.55)';cx.beginPath();cx.arc(sx,sy,22,0,7);cx.fill();
-    cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(sx,sy,11,0,7);cx.fill();
+  var look=levelLook(),sky=look.sky||THEME.sky,zone=look.zone||'base';
+  var g=cx.createLinearGradient(0,-OY,0,-OY+H);
+  g.addColorStop(0,sky[0]);g.addColorStop(0.45,sky[1]);g.addColorStop(1,sky[2]);
+  cx.fillStyle=g;cx.fillRect(-20,-OY-20,W+40,H+40);
+  if(zone==='bowl'){
+    cx.fillStyle='rgba(255,170,110,.32)';cx.beginPath();cx.arc(W*0.78,-OY+H*0.14,40,0,7);cx.fill();
+    cx.fillStyle='rgba(255,220,170,.55)';cx.beginPath();cx.arc(W*0.78,-OY+H*0.14,15,0,7);cx.fill();
+  }else if(zone!=='lake'){
+    cx.fillStyle='rgba(255,244,200,.4)';cx.beginPath();cx.arc(W*0.8,-OY+H*0.1,28,0,7);cx.fill();
+    cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(W*0.8,-OY+H*0.1,11,0,7);cx.fill();
   }
 }
-var BG_SCRATCH=null;
-function drawBackdropHazeSoft(x,y,w,h){
-  /* Soft aerial wash only — gradients fade to 0 at edges (no hard bands) */
-  var sky=curLevel().sky,c0=hexRgb(sky[0]),c1=hexRgb(sky[1]),c2=hexRgb(sky[2]);
-  var g=cx.createLinearGradient(0,y,0,y+h);
-  g.addColorStop(0,rgba(c0,0.10));
-  g.addColorStop(0.35,rgba(c1,0.22));
-  g.addColorStop(0.7,rgba(c2,0.36));
-  g.addColorStop(0.9,rgba(c2,0.28));
-  g.addColorStop(1,rgba(c2,0));
-  cx.fillStyle=g;cx.fillRect(x,y,w,h);
-  var bandTop=y+h*0.45;
-  var g2=cx.createLinearGradient(0,bandTop,0,y+h);
-  g2.addColorStop(0,'rgba(236,244,250,0)');
-  g2.addColorStop(0.55,'rgba(240,247,252,.32)');
-  g2.addColorStop(1,'rgba(244,249,253,0)');
-  cx.fillStyle=g2;cx.fillRect(x,bandTop,w,Math.max(1,y+h-bandTop));
+function ridgeY(wx,base,amp,seed){
+  return base+amp*(0.55*Math.sin(wx*0.0031+seed)+0.28*Math.sin(wx*0.007+seed*1.7)+0.17*Math.sin(wx*0.013+seed*0.6));
+}
+function fillBand(x0,span,yFn,bot,col){
+  cx.fillStyle=col;cx.beginPath();cx.moveTo(x0,bot);
+  for(var x=x0;x<=x0+span;x+=12)cx.lineTo(x,yFn(x));
+  cx.lineTo(x0+span,bot);cx.closePath();cx.fill();
+}
+function faceTop(){return -OY+H*(isLand()?0.22:0.26);} /* ridge leaves a sky band above */
+function hash01(n){var x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x);}
+function wrapView(base,scroll,period){
+  var x=((base-scroll)%period+period)%period;if(x>period*0.85)x-=period;return x;
+}
+/* Soft painted conifer — asymmetric boughs + snow (matches Paint 1 rocks) */
+function drawConifer(x,y,h,body,snow,dense){
+  if(h<3.5)return;
+  var w=h*0.38,skew=(hash01(x*0.17+y*0.09)-0.5)*w*0.35;
+  cx.fillStyle='#4a3a2a';cx.fillRect(x-h*0.04,y-h*0.12,h*0.08,h*0.14);
+  cx.fillStyle=body;
+  cx.beginPath();cx.moveTo(x+skew*0.2,y-h);cx.lineTo(x+w+skew,y-h*0.38);cx.lineTo(x+w*0.28,y-h*0.38);
+  cx.lineTo(x+w*1.1+skew*0.5,y);cx.lineTo(x-w*1.05+skew*0.3,y);cx.lineTo(x-w*0.3,y-h*0.38);cx.lineTo(x-w+skew,y-h*0.38);cx.closePath();cx.fill();
+  if(dense!==0){
+    cx.fillStyle=snow;cx.globalAlpha=0.48;
+    cx.beginPath();cx.moveTo(x+skew*0.2,y-h);cx.lineTo(x+w*0.4+skew*0.3,y-h*0.5);cx.lineTo(x-w*0.35+skew*0.2,y-h*0.5);cx.closePath();cx.fill();
+    if(h>10){cx.beginPath();cx.moveTo(x,y-h*0.55);cx.lineTo(x+w*0.75+skew*0.2,y-h*0.16);cx.lineTo(x-w*0.7+skew*0.2,y-h*0.16);cx.closePath();cx.fill();}
+    cx.globalAlpha=1;
+  }
+}
+function drawChairSeat(x,y,sc,col,rider){
+  sc=sc||1;var w=9*sc,h=5.2*sc;
+  cx.strokeStyle='rgba(255,255,255,.35)';cx.lineWidth=Math.max(1,1.4*sc);
+  cx.beginPath();cx.moveTo(x,y-h*1.5);cx.lineTo(x,y);cx.stroke();
+  cx.strokeStyle=col;cx.lineWidth=Math.max(1.1,1.5*sc);
+  cx.beginPath();cx.moveTo(x,y-h*1.5);cx.lineTo(x,y);cx.stroke();
+  cx.fillStyle=col;cx.fillRect(x-w*0.55,y,w,h*0.55);cx.fillRect(x-w*0.48,y+h*0.55,w*0.3,h*0.6);cx.fillRect(x+w*0.12,y+h*0.55,w*0.3,h*0.6);
+  if(rider){cx.fillStyle=rider;cx.beginPath();cx.arc(x,y+h*0.12,2*sc,0,7);cx.fill();cx.fillRect(x-1.4*sc,y+h*0.12,2.8*sc,3.2*sc);}
+}
+/* Thin groomed cut — snow shows through a forest gap (Alto-style ribbon, not a slab) */
+function drawTrailCut(pts,halfW,snow,shade){
+  /* soft snow cut — never a dark-grey slab through the trees */
+  if(pts.length<2)return;
+  var i,a,b,nx,ny,len,r;
+  cx.beginPath();
+  for(i=0;i<pts.length;i++){
+    a=pts[i];b=pts[Math.min(i+1,pts.length-1)];
+    nx=-(b[1]-a[1]);ny=b[0]-a[0];len=Math.sqrt(nx*nx+ny*ny)||1;nx/=len;ny/=len;
+    if(i===0)cx.moveTo(a[0]+nx*halfW,a[1]+ny*halfW);else cx.lineTo(a[0]+nx*halfW,a[1]+ny*halfW);
+  }
+  for(i=pts.length-1;i>=0;i--){
+    a=pts[i];b=pts[Math.max(i-1,0)];
+    nx=-(a[1]-b[1]);ny=a[0]-b[0];len=Math.sqrt(nx*nx+ny*ny)||1;nx/=len;ny/=len;
+    cx.lineTo(a[0]-nx*halfW,a[1]-ny*halfW);
+  }
+  cx.closePath();
+  var g=cx.createLinearGradient(pts[0][0],pts[0][1],pts[pts.length-1][0],pts[pts.length-1][1]);
+  g.addColorStop(0,snow);g.addColorStop(0.45,'rgba(210,224,236,.55)');g.addColorStop(1,snow);
+  cx.fillStyle=g;cx.globalAlpha=0.88;cx.fill();cx.globalAlpha=1;
+  cx.strokeStyle='rgba(255,255,255,.35)';cx.lineWidth=1.1;cx.stroke();
+  cx.strokeStyle='rgba(40,70,100,.12)';cx.lineWidth=0.8;
+  for(r=-1;r<=1;r+=2){
+    cx.beginPath();
+    for(i=0;i<pts.length;i++){
+      a=pts[i];b=pts[Math.min(i+1,pts.length-1)];
+      nx=-(b[1]-a[1]);ny=b[0]-a[0];len=Math.sqrt(nx*nx+ny*ny)||1;nx/=len;ny/=len;
+      if(i===0)cx.moveTo(a[0]+nx*r*halfW*0.55,a[1]+ny*r*halfW*0.55);else cx.lineTo(a[0]+nx*r*halfW*0.55,a[1]+ny*r*halfW*0.55);
+    }
+    cx.stroke();
+  }
+}
+function trailClear(x,y,trails,pad){
+  var t,i,a,b,dx,dy,len,tpar,px,py,d;
+  for(t=0;t<trails.length;t++){
+    for(i=0;i<trails[t].length-1;i++){
+      a=trails[t][i];b=trails[t][i+1];dx=b[0]-a[0];dy=b[1]-a[1];len=Math.sqrt(dx*dx+dy*dy)||1;
+      tpar=((x-a[0])*dx+(y-a[1])*dy)/(len*len);if(tpar<0)tpar=0;else if(tpar>1)tpar=1;
+      px=a[0]+dx*tpar;py=a[1]+dy*tpar;d=(x-px)*(x-px)+(y-py)*(y-py);
+      if(d<pad*pad)return true;
+    }
+  }
+  return false;
+}
+function drawLodge(x,y,sc,look){
+  sc=sc||1;var bw=74*sc,bh=30*sc,warm=look.zone==='bowl';
+  /* deck + rail */
+  cx.fillStyle='rgba(100,78,55,.4)';cx.fillRect(x-6*sc,y+bh*0.58,bw+22*sc,8*sc);
+  cx.strokeStyle='rgba(140,110,75,.55)';cx.lineWidth=1.2;cx.beginPath();cx.moveTo(x-4*sc,y+bh*0.52);cx.lineTo(x+bw+12*sc,y+bh*0.52);cx.stroke();
+  for(var d=0;d<6;d++){cx.beginPath();cx.moveTo(x+d*16*sc,y+bh*0.52);cx.lineTo(x+d*16*sc,y+bh*0.58+8*sc);cx.stroke();}
+  /* body + roof */
+  cx.fillStyle='#7a654c';cx.fillRect(x,y,bw,bh);
+  cx.fillStyle='#d2b896';
+  cx.beginPath();cx.moveTo(x-7*sc,y);cx.lineTo(x+bw*0.5,y-20*sc);cx.lineTo(x+bw+7*sc,y);cx.closePath();cx.fill();
+  cx.fillStyle='#5e4c3c';cx.fillRect(x+bw*0.7,y+3*sc,bw*0.42,bh*0.9);
+  cx.fillStyle='#c4a888';cx.beginPath();cx.moveTo(x+bw*0.66,y+3*sc);cx.lineTo(x+bw*0.9,y-10*sc);cx.lineTo(x+bw+10*sc,y+3*sc);cx.closePath();cx.fill();
+  /* chimney */
+  cx.fillStyle='#6a5a50';cx.fillRect(x+bw*0.18,y-26*sc,6*sc,12*sc);
+  /* windows + door */
+  cx.fillStyle=warm?'rgba(255,200,110,.95)':'rgba(170,215,235,.85)';
+  for(var w=0;w<4;w++){cx.fillRect(x+8*sc+w*14*sc,y+7*sc,9*sc,10*sc);if(warm){cx.fillStyle='rgba(255,230,160,.35)';cx.beginPath();cx.arc(x+12*sc+w*14*sc,y+12*sc,7*sc,0,7);cx.fill();cx.fillStyle='rgba(255,200,110,.95)';}}
+  cx.fillRect(x+bw*0.78,y+9*sc,8*sc,9*sc);
+  cx.fillStyle='#4a3428';cx.fillRect(x+bw*0.4,y+bh*0.32,10*sc,bh*0.68);
+}
+function drawLiftTerminal(x,y,sc){
+  sc=sc||1;
+  cx.fillStyle='#7a8490';cx.fillRect(x,y,36*sc,16*sc);
+  cx.fillStyle='#c8d0d8';cx.beginPath();cx.moveTo(x-3*sc,y);cx.lineTo(x+18*sc,y-10*sc);cx.lineTo(x+39*sc,y);cx.closePath();cx.fill();
+  cx.fillStyle='#5a6570';cx.fillRect(x+14*sc,y+4*sc,8*sc,12*sc);
+  cx.strokeStyle='rgba(50,60,70,.5)';cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x+18*sc,y);cx.lineTo(x+18*sc,y-22*sc);cx.stroke();
+  cx.fillStyle='#9aa4b0';cx.fillRect(x+10*sc,y-24*sc,16*sc,4*sc);
+}
+function drawPeopleDots(x,y,n,seed){
+  for(var i=0;i<n;i++){
+    var px=x+hash01(seed+i)*50-8,py=y+hash01(seed+i*3)*8;
+    cx.fillStyle=i%3===0?'#c4a06a':(i%3===1?'#3a5a80':'#e8eef4');
+    cx.beginPath();cx.arc(px,py,1.6,0,7);cx.fill();
+    cx.fillRect(px-1,py,2,3.2);
+  }
+}
+function drawResortFar(dist,look){
+  var scroll=(dist*0.07)%2800,x0=-scroll-100,cols=look.far||['#a8c0d2','#c4d6e4'],zone=look.zone;
+  /* bowl: keep far ridge soft + below mid face so tips don't read as floating saucers */
+  var top=faceTop()-(zone==='bowl'?(isLand()?6:10):(isLand()?22:34));
+  var amp=zone==='bowl'?16:30,bot=GROUND-36;
+  fillBand(x0,W+3000,function(x){return ridgeY(x+scroll,top,amp,1.1);},bot,cols[0]);
+  fillBand(x0,W+3000,function(x){return ridgeY(x+scroll,top+14,amp*0.6,2.3);},bot,cols[1]);
+  var sh=cx.createLinearGradient(0,top,0,bot);
+  sh.addColorStop(0,'rgba(255,255,255,.2)');sh.addColorStop(0.5,'rgba(40,70,100,.06)');sh.addColorStop(1,'rgba(40,70,100,0)');
+  cx.fillStyle=sh;cx.fillRect(x0,top-12,W+3000,bot-top+24);
+}
+function buildTrails(x0,top,bot,zone,n){
+  var out=[],tr,k,u,pts,ox,spread=zone==='groomer'?240:(zone==='bowl'?190:210);
+  var lean=zone==='groomer'?210:(zone==='lake'?90:140);
+  var zig=zone==='bowl'?1.8:(zone==='base'?2.8:2.2);
+  for(tr=0;tr<n;tr++){
+    pts=[];ox=x0+(zone==='lake'?380:50)+tr*spread+((tr*47)%40);
+    for(k=0;k<=12;k++){
+      u=k/12;
+      pts.push([ox+u*lean+Math.sin(u*zig+tr*1.3)*18, top+18+u*(bot-top-36)+Math.sin(u*1.5+tr)*7]);
+    }
+    out.push(pts);
+  }
+  return out;
+}
+function inGlade(x,y,glades){
+  var g,dx,dy;
+  for(g=0;g<glades.length;g++){
+    dx=x-glades[g][0];dy=y-glades[g][1];
+    if(dx*dx/(glades[g][2]*glades[g][2])+dy*dy/(glades[g][3]*glades[g][3])<1)return true;
+  }
+  return false;
+}
+/* Forest ~55% of face via irregular clumps — open snow ridge, glades, trail corridors */
+function drawDenseForest(x0,span,topY,botY,forest,snowCol,trails,dens){
+  var faceH=botY-topY,treeTop=topY+faceH*0.28,treeBot=botY-faceH*0.06;
+  var glades=[],gi,nG=dens>=3?9:8,i,c,k,x,y,h,tone,cx0,cy0,nT,ang,rad;
+  for(gi=0;gi<nG;gi++){
+    glades.push([
+      x0+60+hash01(gi*11)*span*0.9,
+      treeTop+hash01(gi*19)*faceH*0.5,
+      42+hash01(gi*3)*58,
+      20+hash01(gi*7)*32
+    ]);
+  }
+  /* light under-canopy only in tree band */
+  var wash=cx.createLinearGradient(0,treeTop,0,treeBot);
+  wash.addColorStop(0,rgba(hexRgb(forest[0]),0));wash.addColorStop(0.4,rgba(hexRgb(forest[1]),0.12));
+  wash.addColorStop(0.85,rgba(hexRgb(forest[2]),0.16));wash.addColorStop(1,rgba(hexRgb(forest[2]),0));
+  cx.fillStyle=wash;cx.fillRect(x0,treeTop,span,treeBot-treeTop);
+  /* clump seeds — break the wallpaper grid; ~55% face cover via gaps+glades+trails */
+  var clumps=Math.floor(span/(dens>=3?38:44));
+  for(c=0;c<clumps;c++){
+    if(hash01(c*3.7)<0.12)continue; /* skip → natural gaps between clumps */
+    cx0=x0+40+hash01(c*5.1)*(span-80);
+    cy0=treeTop+16+hash01(c*9.3)*(treeBot-treeTop-36);
+    if(trailClear(cx0,cy0,trails,16)||inGlade(cx0,cy0,glades))continue;
+    nT=4+((hash01(c*2.2)*6)|0);
+    for(k=0;k<nT;k++){
+      ang=hash01(c*11+k*3)*6.28;rad=6+hash01(c+k*7)*22;
+      x=cx0+Math.cos(ang)*rad;y=cy0+Math.sin(ang)*rad*0.55;
+      if(y<treeTop-4||y>treeBot)continue;
+      if(trailClear(x,y,trails,12)||inGlade(x,y,glades))continue;
+      /* ragged top — fewer trees near upper edge */
+      if(y<treeTop+faceH*0.06&&hash01(c+k)<0.6)continue;
+      tone=forest[hash01(c+k*2)<0.33?0:hash01(c+k)<0.7?1:2];
+      h=(9+hash01(c*4+k)*22)*(0.65+hash01(k*3)*0.85);
+      drawConifer(x,y,h,tone,snowCol,1);
+    }
+  }
+  /* sparse ragged crowns along the treeline */
+  for(i=0;i<Math.floor(span/36);i++){
+    if(hash01(i*41)<0.5)continue;
+    x=x0+i*36+hash01(i*9)*22;
+    y=treeTop-4+hash01(i*17)*18;
+    if(trailClear(x,y,trails,14)||inGlade(x,y,glades))continue;
+    drawConifer(x,y,8+hash01(i)*14,forest[0],snowCol,1);
+  }
+}
+function drawLiftLine(x0,y0,x1,y1,dist,t,zone){
+  /* readable cable: light halo + dark core */
+  cx.strokeStyle='rgba(255,255,255,.4)';cx.lineWidth=3.2;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(x0,y0);cx.lineTo(x1,y1);cx.stroke();
+  cx.strokeStyle='rgba(28,36,48,.82)';cx.lineWidth=2.2;
+  cx.beginPath();cx.moveTo(x0,y0);cx.lineTo(x1,y1);cx.stroke();cx.lineCap='butt';
+  var towers=8,u,px,py,sc,tw,ci;
+  for(tw=0;tw<towers;tw++){
+    u=tw/(towers-1);px=x0+(x1-x0)*u;py=y0+(y1-y0)*u;sc=1.25-u*0.7;
+    cx.fillStyle='#4a5564';cx.fillRect(px-2*sc,py,4*sc,Math.max(8,12*sc+(1-u)*18));
+    cx.fillStyle='#8a96a4';cx.fillRect(px-7.5*sc,py-2.5*sc,15*sc,3.5*sc);
+  }
+  var chairN=10,phase=(dist*0.16+t*18)%1;
+  for(ci=0;ci<chairN;ci++){
+    u=((ci/chairN)+phase)%1;px=x0+(x1-x0)*u;py=y0+(y1-y0)*u;
+    drawChairSeat(px,py+4,1.25-u*0.55,zone==='bowl'?'#c4a070':'#3a4555',ci%2?'#c4a06a':'#2a3a55');
+  }
+}
+function drawResortMid(dist,look){
+  var scroll=(dist*0.16)%2200,x0=-scroll-80,zone=look.zone,t=S?S.t:0;
+  var snow=look.snow||'#eef3f8',ms=look.midSnow||[snow,'#c0d2e0'],forest=look.forest||['#3a5a48','#4e735c','#6a8f74'];
+  var top=faceTop()+(isLand()?4:0),bot=GROUND+6,dens=RESORT_STYLE,span=W+2400;
+  /* snow mountain face — open upper slopes visible above the forest */
+  fillBand(x0,span,function(x){return ridgeY(x+scroll,top,28,0.8);},bot,ms[1]);
+  fillBand(x0,span,function(x){return ridgeY(x+scroll,top+16,18,1.9);},bot,ms[0]);
+  var face=cx.createLinearGradient(0,top,0,bot);
+  face.addColorStop(0,'rgba(255,255,255,.22)');face.addColorStop(0.3,'rgba(255,255,255,.06)');
+  face.addColorStop(0.7,'rgba(50,80,110,.12)');face.addColorStop(1,'rgba(50,80,110,.22)');
+  cx.fillStyle=face;cx.fillRect(x0,top-8,span,bot-top+16);
+  if(zone==='bowl'){
+    /* alpenglow on snow face — soft wash on the snow shape, not a flat peach stripe */
+    var glow=cx.createLinearGradient(0,top,0,bot);
+    glow.addColorStop(0,'rgba(255,200,160,.2)');glow.addColorStop(0.35,'rgba(255,210,180,.08)');glow.addColorStop(0.7,'rgba(200,190,220,.0)');glow.addColorStop(1,'rgba(180,190,220,.06)');
+    cx.fillStyle=glow;cx.fillRect(x0,top-6,span,bot-top+12);
+  }
+  /* per-zone forest/trail layout — don't reuse the same positions */
+  var trailN=zone==='groomer'?3:(zone==='bowl'?2:(zone==='lake'?0:2));
+  var forestBot=bot-(zone==='lake'?92:(zone==='bowl'?8:4));
+  var trails=buildTrails(x0,top,forestBot,zone,trailN),tr;
+  for(tr=0;tr<trails.length;tr++)drawTrailCut(trails[tr],zone==='groomer'?10:6.5,ms[0],look.shade||'#8aa0b0');
+  if(zone!=='lake')drawDenseForest(x0,span,top+2,forestBot,forest,look.tint||snow,trails,dens);
+  else drawDenseForest(x0,span,top+2,top+(bot-top)*0.42,forest,look.tint||snow,trails,dens); /* leave mid band open for lake */
+  var atmo=cx.createLinearGradient(0,top-10,0,top+50);
+  atmo.addColorStop(0,rgba(look.fog||[220,230,240],0.5));atmo.addColorStop(1,rgba(look.fog||[220,230,240],0));
+  cx.fillStyle=atmo;cx.fillRect(x0,top-12,span,62);
+  /* bowl: no mid-air outcrops — floating saucers rejected; rocky feel from hut + alpenglow */
+  /* lift placement differs by zone */
+  var liftX0,liftY0,liftX1,liftY1;
+  if(zone==='base'){liftX0=x0+280;liftY0=bot-44;liftX1=liftX0+640;liftY1=top+40;}
+  else if(zone==='groomer'){liftX0=x0+40;liftY0=bot-10;liftX1=liftX0+820;liftY1=top+18;}
+  else if(zone==='lake'){liftX0=x0+720;liftY0=bot-60;liftX1=liftX0+520;liftY1=top+24;} /* off to the side */
+  else{liftX0=x0+160;liftY0=bot-20;liftX1=liftX0+680;liftY1=top+22;}
+  drawLiftLine(liftX0,liftY0,liftX1,liftY1,dist,t,zone);
+  if(zone!=='lake')drawLiftLine(liftX0+920,liftY0,liftX1+920,liftY1,dist,t,zone);
+  if(zone==='base'){
+    var lx=wrapView(180,scroll,700);
+    drawLodge(lx,bot-52,1.15,look);
+    drawLiftTerminal(lx+86,bot-40,1.1);
+    drawPeopleDots(lx+6,bot-22,8,11);
+    drawPeopleDots(lx+92,bot-20,5,29);
+  }
+  if(zone==='lake'){
+    /* hero frozen lake — clear ice band below treeline (contrasts vs snow face) */
+    var lakeTop=top+(bot-top)*0.48,lakeBot=bot-6,lx0=wrapView(-20,scroll,860);
+    function drawLake(ox){
+      var midY=lakeTop+(lakeBot-lakeTop)*0.55,lw=860;
+      /* ice body — cooler / more saturated than the snow face above */
+      var lg=cx.createLinearGradient(0,lakeTop,0,lakeBot);
+      lg.addColorStop(0,'#b9d8e8');lg.addColorStop(0.35,'#9ecce0');lg.addColorStop(0.7,'#7eb4cc');lg.addColorStop(1,'#6a9eb8');
+      cx.fillStyle=lg;
+      cx.beginPath();
+      cx.moveTo(ox,lakeBot);
+      cx.bezierCurveTo(ox+70,lakeBot-4,ox+160,lakeTop+16,ox+300,lakeTop+2);
+      cx.bezierCurveTo(ox+460,lakeTop-12,ox+600,lakeTop+10,ox+740,lakeTop+20);
+      cx.bezierCurveTo(ox+800,lakeTop+28,ox+840,lakeBot-6,ox+lw,lakeBot);
+      cx.bezierCurveTo(ox+560,lakeBot+12,ox+240,lakeBot+10,ox,lakeBot);
+      cx.closePath();cx.fill();
+      /* far snowy shoreline bank (curved) */
+      cx.fillStyle='#f2f8fc';
+      cx.beginPath();cx.moveTo(ox,lakeTop+8);
+      cx.bezierCurveTo(ox+180,lakeTop-14,ox+400,lakeTop-8,ox+620,lakeTop+8);
+      cx.bezierCurveTo(ox+740,lakeTop+18,ox+820,lakeTop+30,ox+lw,lakeTop+38);
+      cx.lineTo(ox+lw,lakeTop+52);
+      cx.bezierCurveTo(ox+700,lakeTop+22,ox+320,lakeTop+14,ox,lakeTop+22);cx.closePath();cx.fill();
+      /* near bank lip */
+      cx.fillStyle='rgba(236,246,252,.85)';
+      cx.beginPath();cx.moveTo(ox,lakeBot-2);
+      cx.bezierCurveTo(ox+200,lakeBot-22,ox+480,lakeBot-14,ox+lw,lakeBot-4);
+      cx.lineTo(ox+lw,lakeBot+6);cx.lineTo(ox,lakeBot+6);cx.closePath();cx.fill();
+      /* tree reflections */
+      cx.globalAlpha=0.18;cx.fillStyle=forest[0];
+      for(var ri=0;ri<9;ri++){
+        var rx=ox+100+ri*80,rh=12+hash01(ri)*18;
+        cx.beginPath();cx.moveTo(rx,lakeTop+24);cx.lineTo(rx+8,lakeTop+24+rh);cx.lineTo(rx-8,lakeTop+24+rh);cx.fill();
+      }
+      cx.globalAlpha=1;
+      /* skate cracks */
+      cx.strokeStyle='rgba(255,255,255,.45)';cx.lineWidth=1.2;
+      for(var k=0;k<7;k++){
+        cx.beginPath();cx.moveTo(ox+40+k*100,midY-10+k*3);
+        cx.lineTo(ox+170+k*110,midY+8+k*5+Math.sin(k*1.3)*5);cx.stroke();
+      }
+      cx.strokeStyle='rgba(60,110,140,.3)';cx.lineWidth=1.1;
+      cx.beginPath();cx.moveTo(ox+160,lakeTop+30);cx.lineTo(ox+280,lakeBot-18);cx.lineTo(ox+380,lakeTop+40);cx.stroke();
+      /* far-bank shoreline trees */
+      for(var sti=0;sti<11;sti++){
+        if(hash01(sti+5)<0.28)continue;
+        drawConifer(ox+50+sti*72+hash01(sti)*14,lakeTop+4+hash01(sti*3)*6,16+hash01(sti*5)*12,forest[sti%3],look.tint||snow,1);
+      }
+    }
+    drawLake(lx0);drawLake(lx0+860);
+  }
+  if(zone==='bowl'){
+    var hx=wrapView(240,scroll,740);
+    drawLodge(hx,top+34,0.85,look);
+    cx.fillStyle='rgba(255,200,120,.9)';
+    for(var li=0;li<7;li++){cx.beginPath();cx.arc(hx-16+li*26,top+52+hash01(li)*6,3.1,0,7);cx.fill();}
+  }
+  if(zone==='groomer'){
+    /* mid-mountain grooming lines (soft corduroy) — L2 identity */
+    cx.strokeStyle='rgba(255,255,255,.22)';cx.lineWidth=1;
+    for(var gi=0;gi<7;gi++){
+      var gy=top+50+gi*((bot-top-70)/7);
+      cx.beginPath();
+      for(var gx=x0;gx<x0+span;gx+=18){
+        var yy=gy+Math.sin((gx+scroll)*0.02+gi)*2;
+        if(gx===x0)cx.moveTo(gx,yy);else cx.lineTo(gx,yy);
+      }
+      cx.stroke();
+    }
+  }
+}
+function drawResortNear(dist,look){
+  var scroll=(dist*0.34)%1400,x0=-scroll-50,zone=look.zone,t=S?S.t:0;
+  var forest=look.forest||['#3a5a48','#4e735c','#6a8f74'],snow=look.snow||'#eef3f8';
+  var edge=GROUND-(isLand()?16:26);
+  var sh=cx.createLinearGradient(0,edge-30,0,GROUND+16);
+  if(zone==='bowl'){
+    sh.addColorStop(0,'rgba(255,255,255,0)');sh.addColorStop(0.4,'rgba(236,230,240,.18)');
+    sh.addColorStop(0.75,'rgba(255,210,180,.08)');sh.addColorStop(1,'rgba(90,110,150,.08)');
+  }else{
+    sh.addColorStop(0,'rgba(255,255,255,0)');sh.addColorStop(0.55,rgba(hexRgb(snow),0.16));sh.addColorStop(1,'rgba(50,80,110,.08)');
+  }
+  cx.fillStyle=sh;cx.fillRect(x0,edge-30,W+1600,GROUND-edge+46);
+  /* near trees — sparse on lake (hero ice), denser at base, open on groomer */
+  var nTree=zone==='lake'?8:(zone==='groomer'?12:(zone==='bowl'?14:20));
+  var step=zone==='lake'?90:(zone==='groomer'?70:52);
+  for(var i=0;i<nTree;i++){
+    if(zone==='groomer'&&i%3===1)continue;
+    if(hash01(i*11+zone.length)<0.2)continue;
+    var tx=x0+i*step+hash01(i*9)*22,th=20+hash01(i*3)*16;
+    drawConifer(tx,edge+10,th,forest[2],look.tint||snow,1);
+    if(zone!=='lake'&&hash01(i*5)>0.45)drawConifer(tx+10,edge+12,th*0.68,forest[1],snow,1);
+  }
+  if(zone!=='lake'){
+    cx.strokeStyle='rgba(120,90,60,.5)';cx.lineWidth=1.3;
+    for(var fi=0;fi<18;fi++){
+      var fx=x0+fi*72+14;cx.beginPath();cx.moveTo(fx,edge+6);cx.lineTo(fx,edge+18);cx.stroke();
+      if(fi%2===0){cx.beginPath();cx.moveTo(fx,edge+10);cx.lineTo(fx+72,edge+10);cx.stroke();}
+    }
+    for(var mi=0;mi<7;mi++){
+      var mx=x0+mi*170+(zone==='base'?40:60);cx.fillStyle=mi%2?'#e8772e':'#2bd17e';cx.fillRect(mx,edge-8,4,16);
+      cx.fillStyle='#e8eef4';cx.fillRect(mx-1,edge-10,6,3);
+    }
+  }
+  /* L2: chair overhead is the hero near prop */
+  if(zone==='groomer'){
+    var cy=edge-58;
+    cx.strokeStyle='rgba(255,255,255,.4)';cx.lineWidth=3.2;cx.beginPath();cx.moveTo(x0,cy);cx.lineTo(x0+W+1600,cy+Math.sin(scroll*0.002)*4);cx.stroke();
+    cx.strokeStyle='rgba(28,36,48,.85)';cx.lineWidth=2.4;cx.beginPath();cx.moveTo(x0,cy);cx.lineTo(x0+W+1600,cy+Math.sin(scroll*0.002)*4);cx.stroke();
+    for(var tw=0;tw<7;tw++){
+      var tx2=x0+tw*200+20;
+      cx.fillStyle='#4a5564';cx.fillRect(tx2-3,cy,6,edge-cy+8);
+      cx.fillStyle='#8a96a4';cx.fillRect(tx2-10,cy-3,20,4);
+    }
+    var cspan=88,phase=((dist*0.34)+t*26)%cspan;
+    for(var ci=0;ci<15;ci++)drawChairSeat(x0+ci*cspan+phase,cy+12,1.4,'#3a4555',ci%2?'#c4a06a':'#2a3a50');
+  }
+  if(zone==='bowl'){
+    for(var li=0;li<6;li++){
+      var lx=x0+li*190+50;cx.fillStyle='rgba(255,210,140,.85)';cx.beginPath();cx.arc(lx,edge-14,3.4,0,7);cx.fill();
+    }
+  }
+  if(zone==='base'){
+    var lx2=wrapView(250,scroll,700);
+    drawPeopleDots(lx2,edge+4,5,41);
+  }
+}
+/* Dress the pale lower slope — fence, drifts, painted trees below the run */
+function drawSlopeDressing(){
+  if(!S)return;
+  var look=levelLook(),forest=look.forest||['#2a4a38','#3d6a4e','#5a8a68'],dist=S.dist,i,x,y,h;
+  var deep=isLand()?56:110; /* portrait needs more fill under the run */
+  var rx=rideX();
+  /* lower rope / fence line */
+  cx.strokeStyle='rgba(110,85,55,.48)';cx.lineWidth=1.5;
+  for(i=0;i<16;i++){
+    x=-30+i*((W+80)/15);
+    y=gY(x)+deep*0.42+Math.sin((x+dist)*0.02)*3;
+    cx.beginPath();cx.moveTo(x,y);cx.lineTo(x,y+16);cx.stroke();
+    if(i%2===0){cx.beginPath();cx.moveTo(x,y+6);cx.lineTo(x+(W+80)/15,y+6+Math.sin(i)*2);cx.stroke();}
+  }
+  /* snow drifts on the lower face */
+  for(i=0;i<7;i++){
+    x=((i*150+dist*0.2)%(W+140))-50;
+    y=gY(x)+deep*(0.55+0.08*(i%3))+((i*37)%18);
+    drawDrift(x,y,55+((i*13)%34));
+  }
+  /* painted foreground trees below the run (keep rider lane clear) */
+  for(i=0;i<(isLand()?3:5);i++){
+    x=((i*210+70+dist*0.15)%(W+180))-60;
+    if(x>rx-55&&x<rx+130)continue;
+    y=gY(x)+deep*(0.22+0.1*(i%2))+((i*19)%14);
+    h=30+((i*17)%20);
+    drawConifer(x,y,h,forest[i%3],look.tint||look.snow,1);
+  }
+  /* lower trail edge continuing the run downhill */
+  cx.strokeStyle='rgba(255,255,255,.16)';cx.lineWidth=1.2;
+  for(i=0;i<4;i++){
+    cx.beginPath();
+    for(x=-40;x<=W+40;x+=14){
+      y=gY(x)+deep*(0.72+i*0.06)+Math.sin((x+dist)*0.035+i)*2;
+      if(x===-40)cx.moveTo(x,y);else cx.lineTo(x,y);
+    }
+    cx.stroke();
+  }
 }
 function drawBackdrop(dist){
-  var file=curLevel().bg,img=ART.bg[file];
-  if(!img){
-    cx.fillStyle='rgba(74,106,136,.35)';cx.beginPath();cx.moveTo(-20,GROUND+90);
-    for(var i=0;i<=8;i++)cx.lineTo(i*(W/8),GROUND-10-Math.abs(Math.sin(i*0.9+(dist*0.001)))*36);
-    cx.lineTo(W+20,GROUND+90);cx.closePath();cx.fill();
-    return;
-  }
-  /* Full plate (own sky + natural peak silhouette). Width-fit; pin plate top to viewTop
-     so sky/peaks aren't cropped. Soft-fade bottom into snow — no straight edges. */
-  var srcW=img.naturalWidth||img.width||780,srcH=img.naturalHeight||img.height||520;
-  var viewTop=-OY,land=isLand();
-  var yBot=GROUND+(land?Math.min(56,H*0.14):Math.min(120,H*0.17));
-  /* Cover [viewTop → yBot] with the full plate so plate sky fills the top (no sky/plate seam)
-     and peak silhouettes stay natural. Soft-fade the bottom — no straight edges. */
-  var needH=Math.max(120,yBot-viewTop);
-  var scW=(W*(land?1.04:1.08))/srcW;
-  var scH=needH/srcH;
-  var sc=Math.max(scW,scH);
-  var dw=srcW*sc,dh=srcH*sc;
-  var y=viewTop; /* plate sky at top of playfield */
-  var travel=Math.max(1,dw-W);
-  var x0=-((dist*0.028)%travel);
-  var sw=Math.max(1,Math.ceil(dw)),sh=Math.max(1,Math.ceil(dh));
-  if(!BG_SCRATCH)BG_SCRATCH=document.createElement('canvas');
-  if(BG_SCRATCH.width!==sw||BG_SCRATCH.height!==sh){BG_SCRATCH.width=sw;BG_SCRATCH.height=sh;}
-  var tx=BG_SCRATCH.getContext('2d');
-  tx.clearRect(0,0,sw,sh);
-  tx.drawImage(img,0,0,srcW,srcH,0,0,sw,sh);
-  /* Soft-fade plate bottom into fog/snow — long feather past the play band */
-  tx.globalCompositeOperation='destination-out';
-  var fadeH=Math.max(48,sh*(land?0.42:0.30));
-  var erase=tx.createLinearGradient(0,sh-fadeH,0,sh);
-  erase.addColorStop(0,'rgba(0,0,0,0)');
-  erase.addColorStop(0.25,'rgba(0,0,0,.12)');
-  erase.addColorStop(0.55,'rgba(0,0,0,.4)');
-  erase.addColorStop(0.8,'rgba(0,0,0,.75)');
-  erase.addColorStop(1,'rgba(0,0,0,1)');
-  tx.fillStyle=erase;tx.fillRect(0,sh-fadeH,sw,fadeH+2);
-  tx.globalCompositeOperation='source-over';
-  cx.drawImage(BG_SCRATCH,x0,y);
-  drawBackdropHazeSoft(x0,y,dw,Math.min(dh,yBot-y+fadeH*0.5));
-  var fogC=levelLook().fog||[236,244,250],fogTop=yBot-Math.min(H*0.28,dh*0.35),fogBot=yBot+Math.min(80,H*0.12);
+  var look=levelLook();
+  drawResortFar(dist,look);
+  drawResortMid(dist,look);
+  drawResortNear(dist,look);
+  /* soft atmospheric join — cool snow; bowl keeps lavender snow not tan */
+  var fogC=look.zone==='bowl'?[210,208,222]:(look.fog||[236,244,250]);
+  var fogTop=GROUND-48,fogBot=GROUND+24;
   var fog=cx.createLinearGradient(0,fogTop,0,fogBot);
-  fog.addColorStop(0,rgba(fogC,0));fog.addColorStop(0.45,rgba(fogC,0.22));
-  fog.addColorStop(0.8,rgba(fogC,0.42));fog.addColorStop(1,rgba(fogC,0));
-  cx.fillStyle=fog;cx.fillRect(x0-4,fogTop,dw+8,Math.max(1,fogBot-fogTop));
+  fog.addColorStop(0,rgba(fogC,0));fog.addColorStop(0.5,rgba(fogC,0.18));
+  fog.addColorStop(1,rgba(hexRgb(look.snow||'#eef3f8'),0.24));
+  cx.fillStyle=fog;cx.fillRect(-30,fogTop,W+60,fogBot-fogTop);
 }
 function drawNearSnow(){
-  var look=levelLook(),bot=-OY+H,top=Math.max(GROUND+70,bot-H*(isLand()?0.22:0.28));
-  var fog=look.fog||[200,216,230],g=cx.createLinearGradient(0,top,0,bot);
-  g.addColorStop(0,rgba(fog,0));g.addColorStop(0.4,rgba(fog,0.45));g.addColorStop(1,rgba(fog,0.92));
-  cx.fillStyle=g;cx.fillRect(-40,top,W+80,bot-top+4);
+  /* underpaint from the run down — kills body-bg navy wedges at the edges */
+  var look=levelLook(),bot=-OY+H+8,top=GROUND+8;
+  var sn=hexRgb(look.snow||'#eef3f8'),fog=look.zone==='bowl'?[200,202,220]:(look.fog||[200,216,230]);
+  var g=cx.createLinearGradient(0,top,0,bot);
+  g.addColorStop(0,rgba(sn,0.0));
+  if(look.zone==='bowl'){
+    g.addColorStop(0.25,rgba(sn,0.35));g.addColorStop(0.45,'rgba(255,210,180,.08)');
+    g.addColorStop(0.7,rgba(fog,0.72));g.addColorStop(1,rgba(fog,0.96));
+  }else{
+    g.addColorStop(0.28,rgba(sn,0.4));g.addColorStop(0.6,rgba(fog,0.7));g.addColorStop(1,rgba(fog,0.96));
+  }
+  cx.fillStyle=g;cx.fillRect(-60,top,W+120,bot-top+8);
 }
 function worldBottom(){return Math.max(-OY+H+20,GROUND+240);}
 function drawSlopePack(){
@@ -994,7 +1407,7 @@ function draw(){
   drawBackdrop(S?S.dist:0);
   drawSlopePack();
   drawNearSnow();
-  if(S){drawWorldPines();drawParticles();}
+  if(S){drawSlopeDressing();drawWorldPines();drawParticles();}
 
   if(!S){cx.restore();return;}
   var p=S.p;
@@ -1021,26 +1434,33 @@ function draw(){
   if(S.pulse>0){cx.fillStyle='rgba(232,119,46,'+(S.pulse*0.07)+')';cx.fillRect(-30,-OY,W+60,90);}
   if(S.flash<0){cx.fillStyle='rgba(180,220,255,'+(-S.flash)+')';cx.fillRect(-30,-OY,W+60,H);}
 
-  // HUD — no plate/scrim box; readable via stroke + soft shadow only
+  // HUD — soft ellipse vignette (zero alpha well inside fill; no rect)
   var hy=-OY+(OY>12?32:0),barY=82+hy;
   if(!menuOpen()){
     var barX=12,barW=Math.min(230,W*0.55),prog=Math.min(1,S.dist/curLen());
+    var scx=14,scy=hy+20,srx=Math.min(W*1.2,560),sry=barY-hy+160;
+    cx.save();cx.translate(scx,scy);cx.scale(1,sry/srx);
+    var scrim=cx.createRadialGradient(0,0,0,0,0,srx*0.88);
+    scrim.addColorStop(0,'rgba(8,16,30,.42)');scrim.addColorStop(0.25,'rgba(8,16,30,.2)');
+    scrim.addColorStop(0.5,'rgba(8,16,30,.07)');scrim.addColorStop(0.75,'rgba(8,16,30,.015)');
+    scrim.addColorStop(1,'rgba(8,16,30,0)');
+    cx.fillStyle=scrim;cx.beginPath();cx.arc(0,0,srx,0,7);cx.fill();
+    cx.restore();
     function hudText(txt,x,y,font,col){
       cx.font=font;cx.lineJoin='round';cx.miterLimit=2;
-      /* soft glow only — no plate, no hard stroke box */
-      cx.shadowColor='rgba(0,0,0,.85)';cx.shadowBlur=12;cx.shadowOffsetX=0;cx.shadowOffsetY=1;
-      cx.strokeStyle='rgba(4,10,20,.55)';cx.lineWidth=2.5;cx.strokeText(txt,x,y);
+      cx.strokeStyle='rgba(4,10,20,.65)';cx.lineWidth=3.2;cx.strokeText(txt,x,y);
+      cx.strokeStyle='rgba(4,10,20,.25)';cx.lineWidth=5.5;cx.strokeText(txt,x,y);
       cx.fillStyle=col;cx.fillText(txt,x,y);
-      cx.shadowBlur=0;cx.shadowColor='transparent';
     }
     cx.textAlign='left';
     hudText('Score '+score(),12,26+hy,'800 24px system-ui,sans-serif','#fff');
     hudText('♥ '+lives+'  ·  Attempt '+Math.max(1,attempts+(S.mode==='play'||S.mode==='over'?1:0)),12,48+hy,'800 13px system-ui,sans-serif','#e8f2ff');
     hudText(curLevel().id+' '+curLevel().name,12,70+hy,'800 16px system-ui,sans-serif','#fff');
-    /* soft progress track (rounded via path) — not a HUD plate */
-    cx.fillStyle='rgba(0,0,0,.35)';rr(barX,barY,barW,12,6);cx.fill();
-    cx.fillStyle='#2bd17e';rr(barX,barY,Math.max(6,barW*prog),12,6);cx.fill();
-    hudText(Math.floor(prog*100)+'%',barX+barW+8,barY+11,'800 13px system-ui,sans-serif','#fff');
+    /* soft track under fill — readable on pale snow, not a hard box */
+    cx.fillStyle='rgba(8,16,28,.45)';rr(barX,barY,barW,11,5);cx.fill();
+    cx.fillStyle='rgba(255,255,255,.62)';rr(barX,barY,barW,11,5);cx.fill();
+    cx.fillStyle='#2bd17e';rr(barX,barY,Math.max(6,barW*prog),11,5);cx.fill();
+    hudText(Math.floor(prog*100)+'%',barX+barW+8,barY+10,'800 12px system-ui,sans-serif','#fff');
   }
   if(S.mode==='play'&&S.pop){
     var qx=Math.min(W-40,p.x+86),qy=Math.max(barY+26,Math.min(p.y-78,barY+50));
@@ -1082,7 +1502,7 @@ function resize(){
   scale=Math.min(cv.height/(GROUND+(landGuess?210:150)),cv.width/(landGuess?460:340));
   W=cv.width/scale;H=cv.height/scale;
   var land=isLand();
-  OY=H*(land?0.56:0.66)-GROUND; /* steady cam — portrait sits lower */
+  OY=H*(land?0.56:0.70)-GROUND; /* portrait: run lower so mid+fore fill the frame */
   if(land){if(OY<18)OY=18;}else if(OY<48)OY=48;
   if(S&&S.p){S.p.x=rideX();if(S.p.on)S.p.y=gY(S.p.x);}
 }
@@ -1100,9 +1520,9 @@ function openMenu(){
   }else if(menuSheet==='levels'){
     var rows=LEVELS.map(function(L,i){
       var lock=i>unlocks.cleared&&i>0?' (locked)':'';
-      return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+lock+'</b> — '+L.chartKind+' rhythm</p>';
+      return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+lock+'</b> — '+L.tag+'</p>';
     }).join('');
-    el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Distinct plate, slope tint, light, particles, and layout per level.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
+    el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same resort — different zones, each with its own painted look.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
   }else if(menuSheet==='gear'){
     var boards=BOARDS.map(function(b){
       var on=boardUnlocked(b),eq=unlocks.board===b.id;
@@ -1210,7 +1630,7 @@ window.BoulderDodge={
     state:function(){return S;},step:step,jump:jump,spinTap:spinTap,beginPress:beginPress,canvasRelease:canvasRelease,
     holdSet:holdSet,draw:draw,reset:reset,crash:crash,buildObs:buildObs,gromSize:gromSize,fairGap:fairGap,setSeed:setSeed,
     setLevel:setLevel,curLevel:curLevel,LEVELS:LEVELS,ensureBackdrop:ensureBackdrop,gY:gY,slopeAt:slopeAt,terr:terr,pineBlocked:pineBlocked,drawWorldPines:drawWorldPines,poseFor:poseFor,paintRider:paintRider,paintRiderCutout:paintRiderCutout,riderProfileMetrics:riderProfileMetrics,measureRigPixels:measureRigPixels,rigLayout:rigLayout,cutoutSc:cutoutSc,RIG_PARTS:RIG_PARTS,getRigDrawCounts:function(){return RIG_DRAW_COUNTS;},getRigMeta:function(){return ART.rigMeta;},
-    setLevelPlate:function(i,bg,sky){var lv=LEVELS[((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length];if(bg)lv.bg=bg;if(sky)lv.sky=sky;ensureBackdrop(lv.bg);},
+    setLevelPlate:function(i,bg,sky){var lv=LEVELS[((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length];if(sky)lv.sky=sky;},
     clearSpin:clearSpin,clearFlip:clearFlip,clearTricks:clearTricks,
     spinLandingClean:spinLandingClean,flipLandingClean:flipLandingClean,spinTier:spinTier,landFromAir:landFromAir,
     getLives:function(){return lives;},setLives:function(n){lives=Math.max(0,Math.min(LIVES_MAX,n|0));},
@@ -1222,6 +1642,8 @@ window.BoulderDodge={
     apexFloorY:apexFloorY,clampApex:clampApex,curLen:curLen,curChart:curChart,levelLook:levelLook,
     getRockPaint:function(){return ROCK_PAINT;},
     setRockPaint:function(n){ROCK_PAINT=Math.max(1,Math.min(3,n|0));},
+    getResortStyle:function(){return RESORT_STYLE;},
+    setResortStyle:function(n){RESORT_STYLE=Math.max(1,Math.min(3,n|0));},
     getUnlocks:function(){return unlocks;},
     setUnlocks:function(u){unlocks=Object.assign(unlocks,u||{});saveUnlocks();applyEquippedKit();},
     BOARDS:BOARDS,LOOKS:LOOKS,curBoard:curBoard,curLook:curLook,
@@ -1265,8 +1687,9 @@ window.BoulderDodge={
         riderSc:riderSc(),
         artSc:artSc(),
         artOk:!!ART.ok,
-        bgOk:!!ART.bg[curLevel().bg],
-        bgFile:curLevel().bg,
+        bgOk:true,
+        bgFile:'procedural-resort',
+        resortStyle:RESORT_STYLE,
         level:curLevel().id,
         worldRiderH:worldRiderH(),
         playfieldGameH:H,

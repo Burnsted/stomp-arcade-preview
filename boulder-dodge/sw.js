@@ -1,5 +1,5 @@
-/* boulder-dodge-0.9.42-title-locker */
-const C='boulder-dodge-0.9.42-title-locker';
+/* boulder-dodge-0.9.54-ship-qa */
+const C='boulder-dodge-0.9.54-ship-qa';
 const ASSETS=['./','./index.html','./sw.js'];
 const OWN=k=>k.indexOf('boulder-dodge-')===0;
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
