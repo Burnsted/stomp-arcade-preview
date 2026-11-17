@@ -15,9 +15,9 @@
     --safe-l: env(safe-area-inset-left, 0px);
     --safe-r: env(safe-area-inset-right, 0px);
     --safe-t: env(safe-area-inset-top, 0px);
-    --ctrl-size: clamp(68px, 17vw, 88px);
-    /* Portrait: thumb pads around 72–75% of viewport height (Ted) */
-    --ctrl-top: 70%;
+    /* One big trick button — raised above home indicator */
+    --trick-size: clamp(92px, 24vw, 118px);
+    --trick-bottom: max(96px, calc(var(--safe-b) + 72px));
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:#1a2836;overflow:hidden;touch-action:none;
@@ -28,47 +28,58 @@
     padding:calc(10px + var(--safe-t)) 14px 0;
     display:flex;justify-content:space-between;gap:12px;align-items:flex-start;
   }
-  #hud .L h1{margin:0;font:800 15px/1.1 Syne,Sora,sans-serif;letter-spacing:.02em}
-  #hud .L .sub{margin:4px 0 0;font:600 12px/1.2 Sora,sans-serif;color:#b9d8e8}
+  #hud .L h1{
+    margin:0;font:800 15px/1.1 Syne,Sora,sans-serif;letter-spacing:.02em;color:#e8f2f6;
+    text-shadow:0 1px 2px #000c, 0 2px 10px #000a;
+  }
+  #hud .L .sub, #hud .L #sub{
+    margin:4px 0 0;font:800 16px/1.2 Syne,Sora,sans-serif;letter-spacing:.02em;
+    color:#ffffff !important; opacity:1 !important;
+    -webkit-text-stroke:0.25px rgba(0,0,0,.35);
+    text-shadow:0 0 2px #000, 0 1px 2px #000, 0 2px 14px #000e;
+  }
   #hud .R{text-align:right}
   #hud .hearts{font:700 15px/1 Sora,sans-serif;letter-spacing:.06em}
   #hud .charge{margin-top:6px;width:110px;height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden;margin-left:auto}
   #hud .charge>i{display:block;height:100%;width:100%;background:#5ec4a8;border-radius:4px}
-  /* Callout sits under HUD, above playfield — never over sled */
-  #toast{
-    position:fixed;left:50%;top:calc(12px + var(--safe-t) + 52px);transform:translateX(-50%);
-    z-index:4;pointer-events:none;max-width:86vw;text-align:center;
-    font:800 18px/1.15 Syne,Sora,sans-serif;color:#fff;text-shadow:0 2px 12px #000a;
-    opacity:0;transition:opacity .15s;
-  }
-  #toast.on{opacity:1}
-  .ctrl{
-    position:fixed;z-index:5;
-    width:var(--ctrl-size);height:var(--ctrl-size);
-    top:var(--ctrl-top);
-    border:1.5px solid rgba(232,242,246,.42);
-    border-radius:50%; /* circular thumb pads — not boxy / not pill */
-    background:rgba(8,22,34,.38);
+  /* Toast kept in DOM but unused — gameplay feedback is mid-screen canvas only */
+  #toast{display:none}
+  /* Single trick control — translucent circle, not pill/boxy */
+  #trick{
+    position:fixed;z-index:6;
+    width:var(--trick-size);height:var(--trick-size);
+    right:max(14px, calc(var(--safe-r) + 12px));
+    bottom:var(--trick-bottom);
+    border:1.5px solid rgba(232,242,246,.45);
+    border-radius:50%;
+    background:rgba(8,22,34,.40);
     color:#e8f2f6;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-    font:700 9px/1 Sora,sans-serif;letter-spacing:.02em;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font:700 11px/1 Sora,sans-serif;letter-spacing:.03em;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
     touch-action:manipulation;padding:0;margin:0;
   }
-  .ctrl svg{width:24px;height:24px;display:block;flex:0 0 auto;pointer-events:none}
-  .ctrl span{display:block;max-width:92%;overflow:hidden;white-space:nowrap;opacity:.9;line-height:1;pointer-events:none}
-  .ctrl.on{background:rgba(94,196,168,.30);border-color:#5ec4a8}
-  .ctrl.nose.on{background:rgba(240,180,41,.24);border-color:#f0b429}
-  #nose{left:max(14px, calc(var(--safe-l) + 10px))}
-  #throt{right:max(14px, calc(var(--safe-r) + 10px))}
+  #trick svg{width:30px;height:30px;display:block;pointer-events:none}
+  #trick span{opacity:.9;pointer-events:none}
+  #trick small{font:600 9px/1 Sora,sans-serif;opacity:.7;pointer-events:none}
+  #trick.on{background:rgba(240,180,41,.28);border-color:#f0b429}
+  #throtHint{
+    position:fixed;z-index:2;pointer-events:none;
+    left:max(12px, calc(var(--safe-l) + 8px));
+    bottom:var(--trick-bottom);
+    /* Match HUD #sub weight / opacity / shadow */
+    font:800 16px/1.2 Syne,Sora,sans-serif;letter-spacing:.02em;
+    color:#ffffff !important; opacity:1 !important;
+    -webkit-text-stroke:0.35px rgba(0,0,0,.45);
+    text-shadow:0 1px 2px #000c, 0 2px 10px #000a;
+    max-width:44vw;
+    transition:opacity .6s ease;
+  }
+  #throtHint.hide{opacity:0 !important; visibility:hidden !important; display:none !important}
   @media (orientation:landscape){
     :root{
-      --ctrl-size: clamp(60px, 14vh, 76px);
-      /* Landscape: keep fully on-screen, raised above bottom edge */
-      --ctrl-top: auto;
-    }
-    .ctrl{
-      top:auto;
-      bottom:max(22px, calc(var(--safe-b) + 18px));
+      --trick-size: clamp(72px, 16vh, 96px);
+      /* Clear home indicator in landscape too */
+      --trick-bottom: max(48px, calc(var(--safe-b) + 40px));
     }
   }
   #end{
@@ -91,65 +102,135 @@
 <body>
 <canvas id="cv"></canvas>
 <div id="hud">
-  <div class="L"><h1>CORDUROY CLIMB</h1><div class="sub" id="sub">↑ 0 m</div></div>
+  <div class="L">
+    <h1>CORDUROY CLIMB</h1>
+    <div class="sub" id="sub">↑ 0 m</div>
+  </div>
   <div class="R">
     <div class="hearts" id="hearts">♥♥♥♥♡</div>
     <div class="charge"><i id="chg"></i></div>
   </div>
 </div>
 <div id="toast"></div>
-<button type="button" class="ctrl nose" id="nose" aria-label="Nose lift">
-  <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M8 22c4-10 12-14 16-14M8 22h6M8 22l4-5"/></svg>
-  <span>Lift</span>
-</button>
-<button type="button" class="ctrl" id="throt" aria-label="Throttle">
-  <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M16 24V9M16 9l-5 5M16 9l5 5"/></svg>
-  <span>Drive</span>
+<div id="throtHint">Hold left side<br>to throttle</div>
+<button type="button" id="trick" aria-label="Trick">
+  <svg viewBox="0 0 32 32" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M16 24V9M16 9l-5 5M16 9l5 5M8 24c4-3 12-3 16 0"/></svg>
+  <span>TRICK</span>
+  <small>tap · hold</small>
 </button>
 <div id="end"><div class="card"><h2 id="endTitle">SUMMIT</h2><p id="endBody"></p><button type="button" id="again">CLIMB AGAIN</button></div></div>
 <script>
 'use strict';
-/**
- * Backcountry Climb — playable tip.
- * Steady cam (CAM_ROT=0). Look7 sled. Storm/Alpenglow cover backdrops.
- * Circular thumb pads. Terrain-sculpted snow lips (no floating kicker art).
- */
+
 const params=new URLSearchParams(location.search);
 const AUTO=params.get('autoTest')==='1';
 const FORCE_BG=params.get('bg');
-const SHOT=params.get('shot'); // controls|air|land|airland
+const SHOT=params.get('shot'); // climb|pop|meter|green|landed|crash|controls|air|land|rocks
+const FORCE_TREAT=Math.max(1, Math.min(3, +(params.get('treat')||3)|0));
 
 const cv=document.getElementById('cv');
 const cx=cv.getContext('2d',{willReadFrequently:true});
-const noseEl=document.getElementById('nose');
-const throtEl=document.getElementById('throt');
+const trickEl=document.getElementById('trick');
 const toastEl=document.getElementById('toast');
+const throtHintEl=document.getElementById('throtHint');
 const endEl=document.getElementById('end');
+let tipsAfterFirstRun=false; // throttle hint fades after first completed run
 
 const ART_BASE='art/';
-const BG_NATIVE_W=780, BG_NATIVE_H=520;
 const HUMAN_H_FRAC=0.10;
 const CAM_ROT=0;
 const LEVEL_LEN=2400;
-// Wider, lower wind-lips — read as sculpted snow, not sharp wedges
-const LIPS=[[360,110,38],[700,130,46],[1080,120,40],[1460,140,50],[1880,125,42],[2180,135,48]];
+
+const BG_CANDIDATES=['trailhead','meadow','creek','alpine-dusk'];
+const BG_ALTERNATES=[]; // plates dropped from first load
+let BG_ROTATION=BG_CANDIDATES.slice();
+let BG_TREAT=FORCE_TREAT; // 1 Alto-soft · 2 HCR-chunky · 3 Place-continuous
+let levelIdx=0; // bumps each summit / wipe → next setting
+const LIPS=[
+  [320, 90, 34],   // small
+  [560, 140, 88],  // BIG
+  [860, 100, 40],  // small
+  [1120, 150, 96], // BIG
+  [1420, 110, 42], // small
+  [1700, 155, 102],// BIG
+  [2000, 120, 44], // small
+  [2260, 150, 92]  // BIG
+];
+const BIG_AIR_AMP=70;
+const BIG_AIR_TIME=0.42; // airtime threshold for meter
+const METER_GREEN=[0.40, 0.90];
+const METER_GOLD=[0.70, 0.80];
 const TRICKS=[
-  {id:'heel', lab:'HEEL CLICKER', pts:120, spin:0, hold:false},
-  {id:'nohand', lab:'NO-HANDER', pts:140, spin:0, hold:false},
-  {id:'super', lab:'SUPERMAN', pts:160, spin:0, hold:false},
-  {id:'barrel', lab:'BARREL ROLL', pts:200, spin:Math.PI*2, hold:false},
-  {id:'backflip', lab:'BACKFLIP', pts:260, spin:-Math.PI*2, hold:true}
+  {id:'heel', lab:'HEEL CLICKER', pts:120, spin:Math.PI},
+  {id:'nohand', lab:'NO-HANDER', pts:140, spin:Math.PI},
+  {id:'super', lab:'SUPERMAN', pts:160, spin:Math.PI*1.5},
+  {id:'barrel', lab:'BARREL ROLL', pts:200, spin:Math.PI*2},
+  {id:'backflip', lab:'BACKFLIP', pts:260, spin:-Math.PI*2},
+  {id:'720', lab:'720 SPIN', pts:320, spin:Math.PI*4}
 ];
 
 let W=390, H=844, DPR=1;
 let ART={ready:false, world:null, rider:null};
-let BG={storm:null, alpenglow:null, key:'storm', sample:{storm:null, alpenglow:null}};
-let input={throttle:false, nose:false, noseTap:0, noseHeld:0};
+
+const SETTINGS={
+  trailhead:{
+    id:'trailhead', name:'Logging-road trailhead', zone:'trailhead',
+    sky:['#5a84a8','#9bb8d0','#e0ecf4'], snow:'#d8e6f0', shade:'#8aa0b0', tint:'#c5d6e4',
+    far:['#7a90a4','#96a8b8'], midSnow:['#d8e6f0','#b0c4d4'],
+    forest:['#2a4a38','#3d6a4e','#5a8a68'], fog:[220,230,240],
+    rock:['#3a4550','#4e5a66','#636e7a'], rockRim:'#9aa6b2'
+  },
+  meadow:{
+    id:'meadow', name:'Open meadow', zone:'meadow',
+    sky:['#6a9ec4','#b4d2e8','#f2f7fb'], snow:'#e8f2f8', shade:'#a8c0d4', tint:'#dceaf4',
+    far:['#8aa0b4','#a8bcc8'], midSnow:['#e8f2f8','#c4d6e4'],
+    forest:['#355848','#4e7a60','#6a9878'], fog:[230,240,248],
+    rock:['#3a4550','#4e5a66','#636e7a'], rockRim:'#9aa6b2'
+  },
+  creek:{
+    id:'creek', name:'Frozen creek basin', zone:'creek',
+    sky:['#4e7a9a','#8eb4cc','#d8e6f0'], snow:'#d0e0ec', shade:'#7a98ac', tint:'#b8d0e0',
+    far:['#6a8498','#8498a8'], midSnow:['#d0e0ec','#a8c0d0'],
+    forest:['#1e4034','#2f5e48','#457a60'], fog:[200,220,232], ice:'#8ec8e0',
+    rock:['#364048','#4a5660','#5e6a74'], rockRim:'#8a96a0'
+  },
+  'alpine-dusk':{
+    id:'alpine-dusk', name:'High alpine at dusk', zone:'dusk', dusk:1,
+    sky:['#1e2a4a','#b06858','#f0c8a0'], snow:'#f4eef2', shade:'#c4b0bc', tint:'#ebe2e8',
+    far:['#3a3a52','#5a4a58'], midSnow:['#f6f0f4','#e2d0da'],
+    forest:['#2e3834','#44504a','#5e6a62'], fog:[236,224,232],
+    rock:['#3e3a48','#524e5c','#686470'], rockRim:'#a098a4'
+  }
+};
+let BG={ key:'trailhead', treat:BG_TREAT, plates:{}, sample:{} };
+let input={
+  throttle:false, trick:false, trickDownAt:0, trickWasHold:false,
+  throtPointers:new Set()
+};
 let S=null;
 let toastT=0;
+let scorePops=[]; // {lab, pts, t, x, y}
 let raf=0;
-let camSmoothY=null; // eased vertical camera (no tilt)
+let camSmoothY=null;
 let lastCam={x:0,y:0};
+
+function plateIdForLevel(i){
+  if(!BG_ROTATION.length) return 'trailhead';
+  return BG_ROTATION[((i%BG_ROTATION.length)+BG_ROTATION.length)%BG_ROTATION.length];
+}
+function resolveBgKey(){
+  if(FORCE_BG && SETTINGS[FORCE_BG]) return FORCE_BG;
+  const alias={
+    'rocky-ridge':'trailhead','open-snowfield':'meadow','frozen-lake':'creek',
+    'dusk-glow':'alpine-dusk','alpine-bowl':'alpine-dusk','aspen-grove':'trailhead',
+    'storm':'creek','alpenglow':'alpine-dusk'
+  };
+  if(FORCE_BG && alias[FORCE_BG]) return alias[FORCE_BG];
+  return plateIdForLevel(levelIdx);
+}
+function settingLook(key){
+  return SETTINGS[key] || SETTINGS[resolveBgKey()] || SETTINGS.trailhead;
+}
 
 function loadImage(src){
   return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});
@@ -157,34 +238,19 @@ function loadImage(src){
 function loadAtlas(json,img){
   return fetch(json,{cache:'no-store'}).then(r=>r.json()).then(meta=>loadImage(img).then(im=>({meta,img:im,frames:meta.frames})));
 }
-/** Average a strip of the image into an rgb fill — used as sky underlay (never debug purple). */
-function sampleStrip(img, yFrac){
-  try{
-    const c=document.createElement('canvas');
-    const w=24,h=8; c.width=w; c.height=h;
-    const x=c.getContext('2d',{willReadFrequently:true});
-    const sy=Math.max(0, Math.min(img.naturalHeight-1, Math.floor(img.naturalHeight*yFrac)));
-    x.drawImage(img, 0, sy, img.naturalWidth, Math.max(1, Math.floor(img.naturalHeight*0.06)), 0, 0, w, h);
-    const d=x.getImageData(0,0,w,h).data;
-    let r=0,g=0,b=0,n=w*h;
-    for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}
-    return {r:(r/n)|0, g:(g/n)|0, b:(b/n)|0};
-  }catch(e){
-    return null;
-  }
-}
 function initArt(){
   return Promise.all([
     loadAtlas(ART_BASE+'world-atlas.json', ART_BASE+'world-atlas@2x.webp'),
-    loadAtlas(ART_BASE+'rider-atlas.json', ART_BASE+'rider-atlas@2x.webp').catch(()=>null),
-    loadImage(ART_BASE+'bg-styles/bg-storm.webp').catch(()=>null),
-    loadImage(ART_BASE+'bg-styles/bg-alpenglow.webp').catch(()=>null)
-  ]).then(([world,rider,storm,alp])=>{
+    loadAtlas(ART_BASE+'rider-atlas.json', ART_BASE+'rider-atlas@2x.webp').catch(()=>null)
+  ]).then(([world,rider])=>{
     ART.world=world; ART.rider=rider; ART.ready=true;
-    BG.storm=storm; BG.alpenglow=alp;
-    if(storm) BG.sample.storm={top:sampleStrip(storm,0.08), bot:sampleStrip(storm,0.88)};
-    if(alp) BG.sample.alpenglow={top:sampleStrip(alp,0.08), bot:sampleStrip(alp,0.88)};
-    BG.key = FORCE_BG==='alpenglow' && alp ? 'alpenglow' : 'storm';
+    BG.key = resolveBgKey();
+    BG.treat = BG_TREAT;
+    window.__BC_BG={
+      key:BG.key, treat:BG.treat, levelIdx, rotation:BG_ROTATION.slice(),
+      loaded:[], candidates:BG_CANDIDATES.slice(), settings:Object.keys(SETTINGS),
+      platesDropped:true
+    };
   });
 }
 
@@ -193,7 +259,6 @@ function lipDelta(wx){
   for(const [cx0,w,amp] of LIPS){
     const t=(wx-cx0)/w;
     if(t>=0&&t<=1){
-      // Smooth wind-lip hump sculpted into the snow surface (no hard wedge)
       const face=Math.sin(t*Math.PI);
       const bias=t<0.5 ? 1 : 0.55+0.45*(1-t)/0.5;
       lip -= amp * face * bias;
@@ -201,7 +266,7 @@ function lipDelta(wx){
   }
   return lip;
 }
-/** True if world x sits inside a kicker / pad / lip span. */
+
 function onFeatureSpan(wx, pad){
   pad=pad||18;
   for(const [cx0,w] of LIPS){
@@ -209,14 +274,14 @@ function onFeatureSpan(wx, pad){
   }
   return false;
 }
-/** Base slope only (grade + rollers) — never rides a kicker. Used for planted scenery. */
+
 function baseGroundY(wx){
   const base=420;
   const grade=-(wx)*0.085;
   const roll=Math.sin(wx*0.011)*18+Math.sin(wx*0.027+1.2)*9;
   return base+grade+roll;
 }
-/** Uphill terrain: rising grade + rollers + sculpted snow lips (built into the surface). */
+
 function groundY(wx){
   return baseGroundY(wx)+lipDelta(wx);
 }
@@ -228,7 +293,7 @@ function baseSlopeAt(wx){
   const dx=14;
   return Math.atan2(baseGroundY(wx+dx)-baseGroundY(wx-dx), dx*2);
 }
-/** Shift a candidate pine x off any kicker/lip span onto nearby base snow. */
+
 function plantPineX(seed){
   let x=seed;
   for(let i=0;i<24;i++){
@@ -237,32 +302,78 @@ function plantPineX(seed){
   }
   return x;
 }
-/** Sparse fixed world-x pines for the whole climb (≤1–2 visible per screen). */
+
 function buildPines(){
   const out=[];
-  // Fixed world positions — never follow the sled
-  const seeds=[220, 520, 880, 1240, 1580, 1920, 2260];
+  const seeds=[280, 780, 1320, 1860, 2340];
   for(const seed of seeds){
     const x=plantPineX(seed);
     out.push({x, s:0.9+((x*13)%10)/100});
   }
   return out;
 }
-/** Prefer gentle slopes / flats for boulder seats (never sharp peak tips). */
+
+function terrainCurv(x, span){
+  const sp=span||18;
+  const y=groundY(x), left=groundY(x-sp), right=groundY(x+sp);
+  return left + right - 2*y;
+}
+
 function seatOnSlope(seedX){
   let best=seedX, bestScore=1e9;
-  for(let dx=-90; dx<=90; dx+=3){
+  for(let dx=-120; dx<=120; dx+=3){
     const x=seedX+dx;
     const s=Math.abs(slopeAt(x));
-    const y=groundY(x);
-    const left=groundY(x-16), right=groundY(x+16);
-    const curv=left+right-2*y;
-    const isPeak = y < left-2 && y < right-2; // local maximum (smaller y = higher)
-    // Prefer mild slope on a flat/shelf; heavily punish peaks
-    const score = Math.abs(s-0.12)*8 + Math.abs(curv)*0.35 + (isPeak?80:0) + (s<0.04?6:0);
+    const curv=terrainCurv(x, 20);
+    const isPeak = curv > 1.5; // crest — sky would show under a seated rock
+    const onLip = onFeatureSpan(x, 28) ? 40 : 0;
+    const score = Math.abs(s-0.18)*6 + Math.max(0, curv)*4.5 + (isPeak?120:0)
+      + (curv<-2 ? -8 : 0) + (s<0.05?4:0) + (s>0.55?10:0) + onLip;
     if(score<bestScore){bestScore=score; best=x;}
   }
   return best;
+}
+
+function rockSpansCrest(x, r){
+  const half=Math.max(14, r*1.05);
+  const yC=groundY(x), yL=groundY(x-half), yR=groundY(x+half);
+  const chordMid = (yL+yR)*0.5;
+  return yC < chordMid - 2.5 || terrainCurv(x, half) > 2;
+}
+
+function pineGapForRock(r){
+  return Math.max(70, r * 2.05 * 1.5 + 36);
+}
+function tooCloseToPine(x, r, pines){
+  const gap=pineGapForRock(r);
+  const list=pines || (S && S.pines) || [];
+  return list.some(pn=>Math.abs(pn.x - x) < gap);
+}
+function seatClearOfPines(seedX, r){
+  let x=seatOnSlope(seedX);
+  if(!tooCloseToPine(x, r)) return x;
+  for(let dx=24; dx<=220; dx+=12){
+    for(const dir of [1,-1]){
+      const nx=seatOnSlope(seedX + dir*dx);
+      if(!tooCloseToPine(nx, r)) return nx;
+    }
+  }
+  return x + 160;
+}
+
+function lipAmpAt(wx){
+  for(const [cx0,w,amp] of LIPS){
+    if(wx>=cx0-8 && wx<=cx0+w+8) return amp;
+  }
+  return 0;
+}
+function isBigAirEligible(){
+  if(!S) return false;
+  if(S.bigAirLatch) return true;
+  if(S.airTime>=BIG_AIR_TIME) return true;
+  if(S.launchAmp>=BIG_AIR_AMP) return true;
+  const gap=Math.max(0, groundY(S.p.x)-S.p.y);
+  return gap>=72;
 }
 
 function resize(){
@@ -271,62 +382,196 @@ function resize(){
   cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
   cv.style.width=W+'px'; cv.style.height=H+'px';
   cx.setTransform(DPR,0,0,DPR,0,0);
-  const nr=noseEl.getBoundingClientRect(), tr=throtEl.getBoundingClientRect();
+  const tr=trickEl.getBoundingClientRect();
   window.__BC_CTRL={
     W,H, orientation: W>H?'landscape':'portrait',
-    nose:{x:nr.left,y:nr.top,w:nr.width,h:nr.height,
-      visible:nr.bottom<=H+1&&nr.top>=-1&&nr.right<=W+1&&nr.left>=-1,
-      fracY:(nr.top+nr.height/2)/H},
-    throt:{x:tr.left,y:tr.top,w:tr.width,h:tr.height,
+    trick:{x:tr.left,y:tr.top,w:tr.width,h:tr.height,
       visible:tr.bottom<=H+1&&tr.top>=-1&&tr.right<=W+1&&tr.left>=-1,
-      fracY:(tr.top+tr.height/2)/H}
+      fracY:(tr.top+tr.height/2)/H,
+      bottomClear:H-(tr.bottom)},
+    throttleZone:{x:0,y:0,w:Math.min(W*0.62, W-tr.width-24), h:H}
   };
 }
 addEventListener('resize', ()=>{resize();});
 addEventListener('orientationchange', ()=>{setTimeout(resize, 60);});
 
-function bindCtrl(el, key){
-  const down=e=>{e.preventDefault(); input[key]=true; if(key==='nose'){input.noseTap=performance.now(); input.noseHeld=performance.now();} el.classList.add('on');};
-  const up=e=>{e.preventDefault();
-    if(key==='nose' && S && !S.p.on && performance.now()-input.noseTap<220) airTapTrick();
-    input[key]=false; el.classList.remove('on');
-  };
-  el.addEventListener('pointerdown', down);
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', up);
-  el.addEventListener('pointerleave', e=>{if(e.buttons===0) up(e);});
+function pointInTrick(x,y){
+  const r=trickEl.getBoundingClientRect();
+  const pad=8;
+  return x>=r.left-pad && x<=r.right+pad && y>=r.top-pad && y<=r.bottom+pad;
 }
-bindCtrl(noseEl,'nose');
-bindCtrl(throtEl,'throttle');
+function syncThrottle(){
+  input.throttle = input.throtPointers.size>0 || input._keyThrottle;
+}
+
+function onThrotDown(e){
+  if(e.target===trickEl || trickEl.contains(e.target)) return;
+  if(pointInTrick(e.clientX, e.clientY)) return;
+  const tr=trickEl.getBoundingClientRect();
+  if(e.clientX >= tr.left - 4) return;
+  e.preventDefault();
+  try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+  input.throtPointers.add(e.pointerId);
+  syncThrottle();
+}
+function onThrotUp(e){
+  if(!input.throtPointers.has(e.pointerId)) return;
+  e.preventDefault();
+  input.throtPointers.delete(e.pointerId);
+  syncThrottle();
+}
+cv.addEventListener('pointerdown', onThrotDown);
+cv.addEventListener('pointerup', onThrotUp);
+cv.addEventListener('pointercancel', onThrotUp);
+addEventListener('pointerup', onThrotUp);
+addEventListener('pointercancel', onThrotUp);
+
+function onTrickDown(e){
+  e.preventDefault(); e.stopPropagation();
+  input.trick=true; input.trickDownAt=performance.now(); input.trickWasHold=false;
+  trickEl.classList.add('on');
+  if(S && S.p.on){
+  } else if(S && !S.p.on){
+    beginAirTrickHold();
+  }
+}
+function onTrickUp(e){
+  e.preventDefault(); e.stopPropagation();
+  const heldMs=performance.now()-input.trickDownAt;
+  const wasHold=heldMs>=180 || input.trickWasHold;
+  input.trick=false; trickEl.classList.remove('on');
+  if(!S) return;
+  if(S.p.on){
+    if(!wasHold) doGroundPop();
+  } else {
+    if(S.meter.active){
+      releaseMeter(heldMs, wasHold);
+    } else if(!wasHold){
+      doAirTapTrick();
+    } else {
+      commitHoldChain(false);
+    }
+  }
+}
+trickEl.addEventListener('pointerdown', onTrickDown);
+trickEl.addEventListener('pointerup', onTrickUp);
+trickEl.addEventListener('pointercancel', onTrickUp);
+trickEl.addEventListener('pointerleave', e=>{ if(e.buttons===0 && input.trick) onTrickUp(e); });
+
 addEventListener('keydown', e=>{
-  if(e.code==='ArrowRight'||e.code==='KeyD') {input.throttle=true; throtEl.classList.add('on');}
-  if(e.code==='ArrowLeft'||e.code==='KeyA'||e.code==='Space'){
-    if(!input.nose) input.noseTap=performance.now();
-    input.nose=true; noseEl.classList.add('on');
+  if(e.code==='ArrowRight'||e.code==='KeyD'){ input._keyThrottle=true; syncThrottle(); }
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){
+    if(!input.trick){ input.trick=true; input.trickDownAt=performance.now(); input.trickWasHold=false; trickEl.classList.add('on');
+      if(S&&!S.p.on) beginAirTrickHold();
+    }
   }
 });
 addEventListener('keyup', e=>{
-  if(e.code==='ArrowRight'||e.code==='KeyD'){input.throttle=false; throtEl.classList.remove('on');}
-  if(e.code==='ArrowLeft'||e.code==='KeyA'||e.code==='Space'){
-    if(S&&!S.p.on&&performance.now()-input.noseTap<220) airTapTrick();
-    input.nose=false; noseEl.classList.remove('on');
+  if(e.code==='ArrowRight'||e.code==='KeyD'){ input._keyThrottle=false; syncThrottle(); }
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){
+    if(input.trick) onTrickUp(e);
   }
 });
 
-function toast(msg){
-  toastT=1.15; toastEl.textContent=msg; toastEl.classList.add('on');
+function midFlash(lab, pts, perfect){
+  scorePops.push({
+    lab,
+    pts: (pts==null ? null : pts),
+    perfect:!!perfect,
+    t:1.45
+  });
 }
-function airTapTrick(){
-  if(!S||S.p.on||S.p.trick) return;
+function toast(msg){
+  midFlash(msg, null, msg.indexOf('★')>=0 || /PERFECT|STICK IT/i.test(msg));
+}
+function scorePopup(lab, pts, perfect){
+  midFlash(lab, pts, perfect);
+}
+
+function doGroundPop(){
+  if(!S||!S.p.on||S.p._hopLatch) return;
+  const p=S.p;
+  if(p.vx<90) p.vx=110;
+  p.on=false; p.vy=-480 - p.vx*0.28; p._hopLatch=true; p.ang=slopeAt(p.x)-0.22;
+  S.airTime=0; S.launchAmp=lipAmpAt(p.x); S.bigAirLatch=false;
+  resetMeter();
+  toast('POP');
+}
+function doAirTapTrick(){
+  if(!S||S.p.on) return;
+  if(S.meter.active && S.meter.committed) return;
   const t=TRICKS[(S.trickIdx++)%4];
   S.p.trick=t; S.p.trickT=0; S.p.spinTarget=t.spin; S.p.spinAcc=0;
+  S.chainCount=1; S.chainLabs=[t.lab];
+  if(!S.meter.active && !isBigAirEligible()){
+    S.meter.committed=true; S.meter.stick='clean'; S.meter.level=0.35;
+  }
   toast(t.lab);
 }
-function startHoldFlip(){
-  if(!S||S.p.on||S.p.trick) return;
-  const t=TRICKS[4];
-  S.p.trick=t; S.p.trickT=0; S.p.spinTarget=t.spin; S.p.spinAcc=0;
-  toast(t.lab);
+function beginAirTrickHold(){
+  if(!S||S.p.on) return;
+  input.trickWasHold=true;
+  const big=isBigAirEligible();
+  if(big){
+    S.bigAirLatch=true;
+    S.meter.active=true; S.meter.level=Math.max(S.meter.level, 0.08);
+    S.meter.committed=false; S.meter.stick=null; S.meter.holding=true;
+  }
+  if(!S.p.trick){
+    const t=TRICKS[(S.trickIdx++)%TRICKS.length];
+    S.p.trick=t; S.p.trickT=0; S.p.spinTarget=t.spin; S.p.spinAcc=0;
+    S.chainCount=1; S.chainLabs=[t.lab];
+  }
+}
+function releaseMeter(heldMs, wasHold){
+  if(!S||!S.meter.active) return;
+  S.meter.holding=false;
+  const lv=S.meter.level;
+  const inGold=lv>=METER_GOLD[0] && lv<=METER_GOLD[1];
+  const inGreen=lv>=METER_GREEN[0] && lv<=METER_GREEN[1];
+  if(inGold || inGreen){
+    S.meter.committed=true;
+    S.meter.stick=inGold?'perfect':'clean';
+    if(!S.p.trick){
+      const t=TRICKS[Math.min(5, Math.floor(lv*6))];
+      S.p.trick=t; S.chainLabs=[t.lab]; S.chainCount=1;
+      S.p.spinTarget=t.spin; S.p.spinAcc=t.spin;
+    } else {
+      S.p.spinAcc=S.p.spinTarget||0;
+    }
+  } else {
+    S.meter.committed=true;
+    S.meter.stick='crash';
+    S.meter.crash=true;
+  }
+}
+function commitHoldChain(fromMeter){
+  if(!S) return;
+  S.meter.committed=true;
+  S.meter.stick='clean';
+  if(S.p.trick && S.p.spinTarget) S.p.spinAcc=S.p.spinTarget;
+}
+function resetMeter(){
+  if(!S) return;
+  S.meter={active:false, level:0, holding:false, committed:false, stick:null, crash:false};
+  S.chainCount=0; S.chainLabs=[];
+}
+function advanceChain(dt){
+  if(!S||!input.trick||S.p.on) return;
+  const rate = S.meter.active ? 1.15 : 0.9;
+  S.chainTimer = (S.chainTimer||0) + dt*rate;
+  if(S.chainTimer > 0.38){
+    S.chainTimer=0;
+    const t=TRICKS[(S.trickIdx++)%TRICKS.length];
+    S.p.trick=t; S.p.trickT=0;
+    S.p.spinTarget=(S.p.spinTarget||0) + t.spin;
+    S.chainCount=(S.chainCount||0)+1;
+    S.chainLabs=(S.chainLabs||[]).concat([t.lab]);
+    if(S.chainLabs.length>4) S.chainLabs.shift();
+  }
+  if(S.meter.active && S.meter.holding){
+    S.meter.level=Math.min(1, S.meter.level + dt*0.55);
+  }
 }
 
 function syncHud(){
@@ -343,78 +588,163 @@ function syncHud(){
 function reset(){
   endEl.classList.remove('on');
   camSmoothY=null;
-  BG.key = FORCE_BG==='alpenglow' && BG.alpenglow ? 'alpenglow' : 'storm';
+  scorePops=[];
+  BG.key = resolveBgKey();
   const p={
     x:80, y:groundY(80)-2, vx:90, vy:0, ang:slopeAt(80),
     on:true, nose:0, lives:4, charge:1,
-    trick:null, trickT:0, spinAcc:0, spinTarget:0, pose:0
+    trick:null, trickT:0, spinAcc:0, spinTarget:0, pose:0, _hopLatch:false
   };
   S={
     t:0, p, score:0, combo:1, comboChain:0, height:0, bestHeight:0,
     boulders:[], pines:buildPines(), finished:false, crashed:false, dist:0, trickIdx:0,
     landFlash:0, airTime:0, jumpsLanded:0, tricksLanded:0,
-    // Look7 life (transforms only — art locked)
-    lean:0, bob:0, tuck:0, compress:0
+    launchAmp:0, bigAirLatch:false, chainCount:0, chainLabs:[], chainTimer:0,
+    meter:{active:false, level:0, holding:false, committed:false, stick:null, crash:false},
+    lean:0, bob:0, tuck:0, compress:0,
+    throtGlow:0, crashPuff:0, throtHeld:0
   };
-  // Fixed shelf seats on gentle slopes (never peak tips)
-  const seats=[460,640,860,1080,1280,1520,1740,1960,2140,2320];
+  // 2–3 rocks visible per screen: ~W*0.38 world spacing, seed-varied size
+  const spacing = Math.max(260, Math.min(340, (typeof W==='number' && W>100 ? W : 800) * 0.38));
+  const seats=[];
+  for(let x=380; x<LEVEL_LEN-180; x+=spacing) seats.push(x + ((x*0.17)|0)%40 - 20);
   for(let i=0;i<seats.length;i++){
-    const bx=seatOnSlope(seats[i]);
-    S.boulders.push({x:bx, r:15+((i*11)%14), spin:0, hit:false, bury:0.48+((i*5)%8)/100, home:bx});
+    const seed = (seats[i]*0.13 + i*17)|0;
+    // Visual rock height targets ~0.35–0.5× sled; r drives hitbox + draw
+    const r = 22 + (seed%5)*3 + (i%3)*2; // ~22–36
+    let bx=seatClearOfPines(seatOnSlope(seats[i]), r);
+    const rockGap=Math.max(110, r*2.4);
+    for(let tries=0; tries<24; tries++){
+      const clear = !S.boulders.some(ob=>Math.abs(ob.x-bx)<rockGap) && !tooCloseToPine(bx, r);
+      const safe = !rockSpansCrest(bx, r) && terrainCurv(bx, 18) <= 1.5;
+      if(clear && safe) break;
+      bx = seatOnSlope(bx + rockGap * 0.55);
+    }
+    if(rockSpansCrest(bx, r)) bx = seatOnSlope(bx + 40);
+    S.boulders.push({x:bx, r, spin:0, hit:false, bury:0.42+(seed%6)/100, seed, home:bx});
+  }
+  if(throtHintEl){
+    if(tipsAfterFirstRun) throtHintEl.classList.add('hide');
+    else throtHintEl.classList.remove('hide');
   }
   syncHud();
   window.__BC_PINES = S.pines.map(pn=>({x:pn.x, baseY:baseGroundY(pn.x), onFeature:onFeatureSpan(pn.x)}));
   window.__BC_GAME={running:true, levelLen:LEVEL_LEN, pines:window.__BC_PINES};
 }
 
+function resolveLanding(){
+  const p=S.p;
+  const big=S.meter.active || S.bigAirLatch || S.airTime>=BIG_AIR_TIME;
+  const stillHolding = S.meter.active && (S.meter.holding || (input.trick && !S.meter.committed));
+  const crash = stillHolding || S.meter.crash || (S.meter.active && S.meter.stick==='crash')
+    || (S.meter.active && !S.meter.committed && (S.chainCount>0 || p.trick));
+
+  p.y=groundY(p.x); p.vy=0; p.on=true; S.landFlash=0.35; S.compress=1; p._hopLatch=false;
+
+  if(crash){
+    if(!S._auto) p.lives--;
+    toast(stillHolding?'HELD TOO LONG':'UNDER-ROTATED');
+    p.trick=null; p.spinAcc=0; p.spinTarget=0;
+    S.combo=1; S.comboChain=0; p.vx*=0.45;
+    applyCrashPose(p);
+  } else if(S.meter.active && S.meter.committed && (S.meter.stick==='clean'||S.meter.stick==='perfect')){
+    S.jumpsLanded++;
+    const lvl=Math.max(0.2, S.meter.level);
+    const perfect=S.meter.stick==='perfect';
+    const baseTrick=p.trick || TRICKS[Math.min(5, Math.floor(lvl*6))];
+    const chainN=Math.max(1, S.chainCount||1);
+    const mult=(perfect?1.6:1.15) * (1+(chainN-1)*0.35) * (0.7+lvl*0.9) * S.combo;
+    const pts=Math.round(baseTrick.pts * mult);
+    const lab = (S.chainLabs && S.chainLabs.length)
+      ? (chainN>1 ? S.chainLabs[S.chainLabs.length-1]+' ×'+chainN : S.chainLabs[S.chainLabs.length-1])
+      : baseTrick.lab;
+    S.score+=pts; S.tricksLanded++; S.comboChain++;
+    if(S.comboChain>=2) S.combo=Math.min(4, 1+S.comboChain*0.35);
+    scorePopup(lab, pts, perfect);
+    p.trick=null; p.spinAcc=0; p.spinTarget=0; p.ang=slopeAt(p.x);
+  } else if(p.trick && !big){
+    S.jumpsLanded++;
+    const pts=Math.round(p.trick.pts * S.combo);
+    S.score+=pts; S.tricksLanded++; S.comboChain++;
+    if(S.comboChain>=2) S.combo=Math.min(4, 1+S.comboChain*0.35);
+    scorePopup(p.trick.lab, pts, false);
+    p.trick=null; p.spinAcc=0; p.spinTarget=0; p.ang=slopeAt(p.x);
+  } else {
+    S.jumpsLanded++;
+    if(S.airTime>0.28){ S.score+=40; toast('CLEAN'); }
+    p.ang=slopeAt(p.x); p.trick=null; p.spinAcc=0; p.spinTarget=0;
+  }
+
+  S.airTime=0; S.launchAmp=0; S.bigAirLatch=false;
+  resetMeter();
+}
+
 function step(dt){
   if(!S||S.finished) return;
   const p=S.p;
   S.t+=dt;
-  if(toastT>0){toastT-=dt; if(toastT<=0) toastEl.classList.remove('on');}
+  const glowTgt = input.throttle ? 1 : 0;
+  S.throtGlow += (glowTgt - S.throtGlow)*Math.min(1, 10*dt);
+  if(input.throttle) S.throtHeld = (S.throtHeld||0) + dt;
+  if(throtHintEl && !tipsAfterFirstRun){
+    if((S.throtHeld||0) >= 3) throtHintEl.classList.add('hide');
+    else throtHintEl.classList.remove('hide');
+  }
   if(S.landFlash>0) S.landFlash-=dt;
+  if(S.crashPuff>0 && !SHOT) S.crashPuff=Math.max(0, S.crashPuff-0.55*dt);
+  for(let i=scorePops.length-1;i>=0;i--){
+    if(SHOT) break; // freeze result cards for QA shots
+    scorePops[i].t-=dt;
+    if(scorePops[i].t<=0) scorePops.splice(i,1);
+  }
 
-  if(input.nose && !p.on && !p.trick && performance.now()-input.noseHeld>160) startHoldFlip();
+  if(input.trick && performance.now()-input.trickDownAt>180){
+    input.trickWasHold=true;
+    if(!p.on && !S.meter.holding) beginAirTrickHold();
+  }
+  if(!p.on) advanceChain(dt);
+
+  if(!p.on && input.trick && !S.meter.active && isBigAirEligible()){
+    beginAirTrickHold();
+  }
 
   const slope=slopeAt(p.x);
-  // Look7 life targets (eased below) — climb lean-back, descent lean-forward
-  const climbLean = Math.max(-0.22, Math.min(0.28, -slope*0.55 + (input.nose?0.12:0) - (input.throttle&&slope>0.05?0.08:0)));
+  const climbLean = Math.max(-0.22, Math.min(0.28, -slope*0.55 - (input.throttle&&slope>0.05?0.08:0) + (!p.on&&input.trick?0.1:0)));
   const bump = Math.abs(lipDelta(p.x)-lipDelta(p.x-10))*0.04 + Math.abs(Math.sin(p.x*0.027))*0.5;
   if(p.on){
     const thr=input.throttle?1:0;
     const steep=Math.max(0, -slope);
-    const acc=(980*thr - 420*(1-thr) - steep*1400);
-    p.vx=Math.max(40, Math.min(460, p.vx+acc*dt));
+    const acc=(980*thr - 520*(1-thr) - steep*1400);
+    p.vx=Math.max(35, Math.min(480, p.vx+acc*dt));
     p.x+=p.vx*dt;
     p.y=groundY(p.x);
-    if(input.nose){
-      p.nose=Math.min(0.75, p.nose+4.2*dt);
-      if(p.nose>0.55 && p.vx>120 && !p._hopLatch){
-        p.on=false; p.vy=-520 - p.vx*0.35; p._hopLatch=true; p.ang=slope-0.2;
-      }
-    } else {
-      p.nose=Math.max(0, p.nose-5*dt); p._hopLatch=false;
-    }
-    p.ang=slope - p.nose*0.55;
+    p.nose=Math.max(0, p.nose-5*dt);
+    p.ang=slope;
     const ahead=slopeAt(p.x+28);
     if(ahead < slope-0.22 && p.vx>140){
-      p.on=false; p.vy=-680 - Math.max(0,-ahead)*400; p.ang=slope-0.15; S.airTime=0;
+      p.on=false;
+      const amp=Math.max(lipAmpAt(p.x), lipAmpAt(p.x+20));
+      S.launchAmp=amp;
+      S.bigAirLatch=amp>=BIG_AIR_AMP;
+      const boost = S.bigAirLatch ? 1.25 : 1;
+      p.vy=(-680 - Math.max(0,-ahead)*400)*boost;
+      p.ang=slope-0.15; S.airTime=0; resetMeter();
     }
     p.charge=Math.max(0, Math.min(1, p.charge - thr*0.07*dt + (1-thr)*0.025*dt));
     S.tuck += (0 - S.tuck)*Math.min(1, 8*dt);
     S.bob += ((Math.sin(S.t*10)*1.6 + bump*2.2) - S.bob)*Math.min(1, 10*dt);
   } else {
     S.airTime+=dt;
+    if(!S.bigAirLatch && (S.airTime>=BIG_AIR_TIME || S.launchAmp>=BIG_AIR_AMP)) S.bigAirLatch=true;
     p.vy+=3600*dt;
     p.x+=p.vx*dt;
     p.y+=p.vy*dt;
     if(p.trick && p.spinTarget){
-      const stepA=p.spinTarget*dt/0.55;
+      const remain=p.spinTarget - p.spinAcc;
+      const stepA=remain * Math.min(1, dt/0.42);
       p.ang+=stepA; p.spinAcc+=stepA;
-    } else if(input.nose){
-      p.ang-=1.8*dt;
-    } else if(input.throttle){
-      p.ang+=1.2*dt;
+    } else if(input.trick){
+      p.ang-=1.4*dt;
     } else {
       const tgt=slopeAt(p.x)*0.85;
       p.ang+=(tgt-p.ang)*Math.min(1, 2.2*dt);
@@ -422,37 +752,10 @@ function step(dt){
     if(p.trick) p.trickT+=dt;
     const g2=groundY(p.x);
     if(p.y>=g2 && p.vy>0){
-      const err=Math.abs(p.ang - slopeAt(p.x));
-      const hard=p.vy>1100;
-      p.y=g2; p.vy=0; p.on=true; S.landFlash=0.35; S.compress=1;
-      if(err>0.85 || (hard && err>0.55)){
-        if(!S._auto) p.lives--;
-        if(p.trick){ toast('BAILED'); p.trick=null; S.combo=1; S.comboChain=0; }
-        else toast('HEAVY LANDING');
-        p.ang=slopeAt(p.x); p.vx*=0.55;
-      } else {
-        S.jumpsLanded++;
-        if(p.trick){
-          const done=!p.spinTarget || Math.abs(p.spinAcc)>=Math.abs(p.spinTarget)*0.85;
-          if(done){
-            const pts=Math.round(p.trick.pts * S.combo);
-            S.score+=pts; S.tricksLanded++; S.comboChain++;
-            if(S.comboChain>=2) S.combo=Math.min(4, 1+S.comboChain*0.35);
-            toast(p.trick.lab+' +'+pts+(S.combo>1?' ×'+S.combo.toFixed(1):''));
-          } else {
-            toast('INCOMPLETE'); S.combo=1; S.comboChain=0;
-          }
-          p.trick=null; p.spinAcc=0; p.spinTarget=0;
-        } else if(S.airTime>0.35){
-          S.score+=40; toast('CLEAN');
-        }
-        p.ang=slopeAt(p.x); p.nose=0;
-      }
-      S.airTime=0;
+      resolveLanding();
     }
     p.charge=Math.max(0, p.charge - (input.throttle?0.03:0)*dt);
-    // Air tuck / body tilt through tricks
-    const tuckTgt = p.trick ? 0.16 : 0.08;
+    const tuckTgt = p.trick || S.meter.active ? 0.16 : 0.08;
     S.tuck += (tuckTgt - S.tuck)*Math.min(1, 6*dt);
     S.bob += (0 - S.bob)*Math.min(1, 6*dt);
   }
@@ -463,7 +766,6 @@ function step(dt){
   for(const b of S.boulders){
     if(b.hit) continue;
     b.x -= (140 + b.r)*dt;
-    // Re-seat onto a shelf whenever we approach a peak tip
     const y=groundY(b.x), left=groundY(b.x-14), right=groundY(b.x+14);
     if(y < left-1.5 && y < right-1.5) b.x=seatOnSlope(b.x);
     b.spin += 2.0*dt;
@@ -483,33 +785,117 @@ function step(dt){
   window.__BC_GAME={
     running:!S.finished, x:p.x, on:p.on, ang:p.ang, height:S.height, score:S.score,
     jumpsLanded:S.jumpsLanded, tricksLanded:S.tricksLanded, lives:p.lives,
-    airTime:S.airTime, finished:S.finished, won:S.won, CAM_ROT
+    airTime:S.airTime, meter:S.meter, bigAir:S.bigAirLatch, finished:S.finished, won:S.won,
+    CAM_ROT, bg:BG.key, levelIdx
   };
 }
 
+function contrastProbe(){
+  try{
+    const data=cx.getImageData(0,0,cv.width,cv.height).data;
+    const ww=cv.width, hh=cv.height;
+    function sampleBox(x0,y0,x1,y1){
+      let r=0,g=0,b=0,n=0;
+      for(let y=y0;y<y1;y+=3){
+        for(let x=x0;x<x1;x+=3){
+          const i=((y*ww+x)|0)*4; r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++;
+        }
+      }
+      if(!n) return null;
+      r/=n; g/=n; b/=n;
+      const lum=0.2126*r+0.7152*g+0.0722*b;
+      return {r:r|0,g:g|0,b:b|0,lum:+lum.toFixed(1)};
+    }
+    const sled=sampleBox(((W*0.32)*DPR)|0, ((H*0.34)*DPR)|0, ((W*0.58)*DPR)|0, ((H*0.55)*DPR)|0);
+    const meter=sampleBox(((W*0.02)*DPR)|0, ((H*0.22)*DPR)|0, ((W*0.14)*DPR)|0, ((H*0.55)*DPR)|0);
+    const plate=sampleBox(((W*0.55)*DPR)|0, ((H*0.08)*DPR)|0, ((W*0.95)*DPR)|0, ((H*0.40)*DPR)|0);
+    const dSled=sled&&plate ? Math.abs(sled.lum-plate.lum) : 0;
+    const dMeter=meter&&plate ? Math.abs(meter.lum-plate.lum) : 0;
+    const sledOk=dSled>=28;
+    const meterOk=dMeter>=22 || (meter && meter.lum>90); // bright meter fill reads even on mid plates
+    return {bg:BG.key, sled, meter, plate, dSled:+dSled.toFixed(1), dMeter:+dMeter.toFixed(1), sledOk, meterOk, ok:sledOk&&meterOk};
+  }catch(e){
+    return {ok:false, err:String(e), bg:BG.key};
+  }
+}
+window.__BC_contrastProbe=contrastProbe;
+
 function finish(won){
   S.finished=true; S.won=won;
+  tipsAfterFirstRun=true;
+  if(throtHintEl) throtHintEl.classList.add('hide');
   document.getElementById('endTitle').textContent=won?'SUMMIT CLEARED':'WIPED';
   document.getElementById('endBody').textContent=
     (won?'Height '+S.height+' m':'Try again')+' · Score '+S.score+
-    ' · Jumps '+S.jumpsLanded+' · Tricks '+S.tricksLanded;
+    ' · Jumps '+S.jumpsLanded+' · Tricks '+S.tricksLanded+
+    ' · BG '+BG.key;
   endEl.classList.add('on');
   window.__BC_GAME.finished=true; window.__BC_GAME.won=won;
+  window.__BC_GAME.bg=BG.key; window.__BC_GAME.levelIdx=levelIdx;
+  levelIdx++;
 }
 document.getElementById('again').onclick=()=>reset();
 
-function humanPx(){ return H*HUMAN_H_FRAC; }
-function artScale(){ return humanPx()/85; }
+function humanPx(){
+  if(W > H) return Math.max(H * 0.22, 72);
+  return H * HUMAN_H_FRAC;
+}
+function artScale(){
+  const base = humanPx() / 85;
+  if(W <= H || !ART.world || !ART.world.frames.sled) return base;
+  const nativeW = (ART.world.frames.sled.w / 2) || 120;
+  return Math.max(base, 56 / nativeW);
+}
 
-/**
- * Look7 sled+driver (art locked). Life via transforms only:
- * lean on climbs/descents, bob over bumps, tuck/tilt in air, compress on landing.
- */
+const CRASH_BURY_MAX=8;
+
+function crashPenetration(px, py, ang, lean, sw){
+  const th=ang + (lean||0);
+  const cos=Math.cos(th), sin=Math.sin(th);
+  let maxPen= -1e9;
+  for(const lx of [-sw/2, -sw/4, 0, sw/4, sw/2]){
+    const wx=px + lx*cos;
+    const wy=py + lx*sin;
+    const pen=wy - groundY(wx);
+    if(pen>maxPen) maxPen=pen;
+  }
+  return maxPen;
+}
+function applyCrashPose(p){
+  if(!p) return;
+  const slope=slopeAt(p.x);
+  p.y=groundY(p.x) + 1;
+  p.on=true;
+  S.crashed=true;
+  S.crashPuff=1;
+  S.lean=0;
+  S.bob=0;
+  S.tuck=0;
+  S.compress=0.2; // slight squash reads as impact without breaking the silhouette
+  p.ang=slope; // seat flat on the slope — Look7 skis stay with the body
+}
+
+function drawCrashPuff(p){
+  if(!S || !(S.crashed || S.crashPuff>0)) return;
+  const gy=groundY(p.x);
+  const a=Math.max(0.35, Math.min(1, S.crashPuff || 0.85));
+  cx.save();
+  cx.fillStyle='#f7fbff';
+  cx.globalAlpha=0.50*a;
+  cx.beginPath(); cx.ellipse(p.x+2, gy+3, 36, 8, 0.04, 0, Math.PI*2); cx.fill();
+  cx.globalAlpha=0.32*a;
+  cx.beginPath(); cx.ellipse(p.x-12, gy+2, 20, 6, -0.1, 0, Math.PI*2); cx.fill();
+  cx.restore();
+}
+
 function blitSled(x,y,ang){
   if(!ART.world) return;
   const sf=ART.world.frames.sled;
   const sc=artScale();
   const sw=(sf.w/2)*sc, sh=(sf.h/2)*sc;
+  if(typeof window!=='undefined'){
+    window.__BC_SLED_PX={w:sw, h:sh, landscape:W>H, artScale:sc};
+  }
   const lean=S?S.lean:0;
   const bob=S?S.bob:0;
   const tuck=S?S.tuck:0;
@@ -520,7 +906,6 @@ function blitSled(x,y,ang){
   cx.translate(x, y + bob);
   cx.rotate((ang||0) + lean);
   cx.scale(sx, sy);
-  // Look7 faces right — no mirror
   cx.drawImage(ART.world.img, sf.x,sf.y,sf.w,sf.h, -sw/2,-sh, sw,sh);
   cx.restore();
 }
@@ -532,7 +917,6 @@ function blitWorld(name,x,y,ang,opt){
   const w=(f.w/2)*sc, h=(f.h/2)*sc;
   cx.save(); cx.translate(x,y); if(ang) cx.rotate(ang);
   if(opt.clipBottom){
-    // Half-bury: clip lower portion so it sits in snow
     cx.beginPath();
     cx.rect(-w/2, -h, w, h*(1-opt.clipBottom));
     cx.clip();
@@ -542,104 +926,566 @@ function blitWorld(name,x,y,ang,opt){
 }
 
 /**
- * Backdrop fills sky down to the terrain.
- * Alpenglow: keep mountain band, then stretch bottom source rows into a snowfield
- * so mountains blend into snow with no hard horizontal seam. Terrain draws over it.
- * Storm: cover fill, bottom-anchored.
+ * Paint 1 rock from 212142d structure — isolated path per rock.
+ * Absolute size: h = 0.42–0.5× sled, w = 1.45–1.8× h. Dark mid #3a4550.
+ * Drift = slope snow fill over bottom 40–50% (no separate oval blobs).
  */
-function drawBackdrop(camX, terrainScreenY){
-  const key=BG.key;
-  const img=BG[key]||BG.storm;
-  const meetY = Math.max(H*0.42, Math.min(H*0.78, terrainScreenY!=null ? terrainScreenY : H*0.62));
-
-  // Opaque underlay — dusk above, snowfield below (never purple clear)
-  const ug=cx.createLinearGradient(0,0,0,H);
-  if(key==='alpenglow'){
-    ug.addColorStop(0,'#2e2430');
-    ug.addColorStop(0.28,'#5a4550');
-    ug.addColorStop(0.48,'#d8cfc8');
-    ug.addColorStop(0.62,'#e7eef4');
-    ug.addColorStop(1,'#e7eef4');
-  } else {
-    ug.addColorStop(0,'#1a2838');
-    ug.addColorStop(0.45,'#5a7386');
-    ug.addColorStop(0.70,'#e7eef4');
-    ug.addColorStop(1,'#e7eef4');
+function sledRefH(){
+  if(window.__BC_SLED_PX && window.__BC_SLED_PX.h) return window.__BC_SLED_PX.h;
+  return humanPx() * 0.88;
+}
+function rockDims(b){
+  const seed = (b.seed != null ? b.seed : ((b.x*0.13+b.r)|0));
+  const sledH = sledRefH();
+  const h = sledH * (0.42 + (seed % 5) * 0.02); // 0.42–0.50 × sled
+  const aspect = 1.45 + (seed % 4) * 0.08;      // 1.45–1.77
+  const w = h * aspect;
+  return {w, h, seed, aspect, sledH};
+}
+function rockSilhouette(w, h, seed){
+  const s = seed|0;
+  const n = 6 + (s % 4); // 6–9 verts
+  const j = (k)=> hash01(s*17.3 + k*9.1);
+  const pts = [];
+  pts.push([-w*(0.48+j(1)*0.05),  h*(0.22+j(2)*0.05)]);
+  pts.push([-w*(0.52+j(3)*0.04), -h*(0.02+j(4)*0.05)]);
+  pts.push([-w*(0.34+j(5)*0.07), -h*(0.30+j(6)*0.07)]);
+  pts.push([-w*(0.08+j(7)*0.06), -h*(0.48+j(8)*0.05)]);
+  if(n >= 7) pts.push([ w*(0.06+j(9)*0.05), -h*(0.40+j(10)*0.06)]);
+  pts.push([ w*(0.22+j(11)*0.07), -h*(0.34+j(12)*0.06)]);
+  pts.push([ w*(0.46+j(13)*0.05), -h*(0.06+j(14)*0.05)]);
+  if(n >= 8) pts.push([ w*(0.50+j(15)*0.04),  h*(0.14+j(16)*0.05)]);
+  pts.push([ w*(0.30+j(17)*0.05),  h*(0.28+j(18)*0.04)]);
+  if(n >= 9) pts.push([ w*(0.02+j(19)*0.05),  h*(0.32+j(20)*0.04)]);
+  pts.push([-w*(0.22+j(21)*0.05),  h*(0.30+j(22)*0.04)]);
+  return pts;
+}
+/** Slope snow drawn over a rock's buried bottom — own beginPath, world space. */
+function drawSlopeRockDrift(cx0, halfW, peak, sn){
+  const x0 = cx0 - halfW, x1 = cx0 + halfW;
+  cx.save();
+  cx.beginPath();
+  cx.moveTo(x0, groundY(x0));
+  for(let x=x0; x<=x1; x+=4){
+    const t = (x - cx0) / Math.max(1e-3, halfW);
+    // Plateau across the rock, soft falloff only near the rims (avoids manta U-bite)
+    const edge = Math.min(1, Math.max(0, (1 - Math.abs(t)) / 0.22));
+    const u = edge * edge * (3 - 2 * edge); // smoothstep
+    const bump = peak * (0.78 + 0.22 * u);
+    cx.lineTo(x, groundY(x) - bump);
   }
-  cx.fillStyle=ug;
-  cx.fillRect(0,0,W,H);
-  if(!img) return;
+  for(let x=x1; x>=x0; x-=4) cx.lineTo(x, groundY(x)+1);
+  cx.closePath();
+  cx.fillStyle = sn;
+  cx.fill();
+  cx.restore();
+}
+function drawBoulder(b){
+  if(b.hit) return;
+  const look = settingLook(BG.key);
+  const {w, h, seed} = rockDims(b);
+  const half = w * 0.5;
+  const gy = groundY(b.x);
+  const ang = Math.atan2(groundY(b.x + half) - groundY(b.x - half), half * 2);
+  const cols = look.rock || ['#3a4550','#4e5a66','#636e7a'];
+  const sn = look.snow || '#d8e6f0';
+  const buryFrac = 0.42 + (seed % 5) * 0.02; // 42–50%
+  const y0 = -h * 0.12;
+  // Keep top (1-buryFrac) of body; cut is local-y near the seat (no deep center bite)
+  const bodyTop = -h * 0.60;
+  const cutY = bodyTop + h * 0.60 * (1 - buryFrac); // ≈ -0.30h … -0.25h
 
-  const nw=img.naturalWidth||BG_NATIVE_W, nh=img.naturalHeight||BG_NATIVE_H;
-  const shiftBase=(camX*0.04);
+  // Per-rock isolation — never append into a shared path
+  cx.save();
+  cx.translate(b.x, gy);
+  cx.rotate(ang);
+  if(seed % 2) cx.scale(-1, 1);
 
-  if(key==='alpenglow'){
-    // Mountain/lodge band — scale so feet reach the terrain meet line
-    const srcH=Math.floor(nh*0.55);
-    const targetH=Math.max(H*0.50, meetY*0.96);
-    const sc=Math.max(W/nw, targetH/srcH)*1.02;
-    const tw=nw*sc, th=srcH*sc;
-    const y=Math.max(-th*0.05, meetY - th + 4);
-    const shift=((shiftBase)%tw+tw)%tw;
-    for(let x=-shift-tw; x<W+tw; x+=tw){
-      cx.drawImage(img, 0, 0, nw, srcH, x, y, tw, th);
+  // Clip per rock only — flat seat cut (not a curved path merged into the silhouette)
+  cx.save();
+  cx.beginPath();
+  cx.rect(-w * 1.25, -h * 1.8, w * 2.5, Math.max(8, cutY - (-h * 1.8)));
+  cx.clip();
+
+  const sil = rockSilhouette(w, h, seed);
+  cx.beginPath();
+  for(let i=0;i<sil.length;i++){
+    const px = sil[i][0], py = sil[i][1] + y0;
+    if(i===0) cx.moveTo(px, py); else cx.lineTo(px, py);
+  }
+  cx.closePath();
+  cx.fillStyle = cols[0]; // dark mid #3a4550
+  cx.fill();
+
+  // Subtle mid facet (dark family — not a pale hole)
+  cx.beginPath();
+  cx.moveTo(-w*0.22, y0 - h*0.18);
+  cx.lineTo(w*0.00, y0 - h*0.38);
+  cx.lineTo(w*0.26, y0 - h*0.04);
+  cx.lineTo(w*0.02, y0 + h*0.12);
+  cx.closePath();
+  cx.fillStyle = cols[1];
+  cx.fill();
+  cx.restore(); // end clip
+
+  cx.restore(); // end rock local transform
+
+  // Continuous slope drift: follow slope y, shallow blend over the cut — no tall parabolic U
+  const peak = Math.max(6, -cutY * 0.90);
+  drawSlopeRockDrift(b.x, half * 1.12, peak, sn);
+
+  // QA harness: record bbox for viewport-width assert
+  if(!window.__BC_ROCK_BBOX) window.__BC_ROCK_BBOX = [];
+  window.__BC_ROCK_BBOX.push({x:b.x, w, h, seed, buryFrac});
+}
+
+/** Fail the shot if any rock bbox is wider than 12% of the viewport. */
+function assertRockBboxWidth(){
+  const list = window.__BC_ROCK_BBOX || [];
+  const limit = W * 0.12;
+  const bad = [];
+  for(const r of list){
+    if(r.w >= limit) bad.push({x:r.x, w:+r.w.toFixed(1), h:+r.h.toFixed(1), limit:+limit.toFixed(1), pct:+((r.w/W)*100).toFixed(1)});
+  }
+  const report = {ok: bad.length===0, count:list.length, limit:+limit.toFixed(1), W, bad, rocks:list.map(r=>({x:r.x,w:+r.w.toFixed(1),h:+r.h.toFixed(1),pct:+((r.w/W)*100).toFixed(1)}))};
+  window.__BC_ROCK_ASSERT = report;
+  return report;
+}
+window.assertRockBboxWidth = assertRockBboxWidth;
+
+function hexRgb(hex){
+  hex=(hex||'#9ecce8').replace('#','');
+  if(hex.length===3) hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return [parseInt(hex.slice(0,2),16)||158, parseInt(hex.slice(2,4),16)||204, parseInt(hex.slice(4,6),16)||232];
+}
+function rgba(rgb,a){ return 'rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+a+')'; }
+function hash01(n){ const x=Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+function fillBand(x0, span, yFn, bot, col){
+  cx.fillStyle=col; cx.beginPath(); cx.moveTo(x0, bot);
+  for(let x=x0; x<=x0+span; x+=12) cx.lineTo(x, yFn(x));
+  cx.lineTo(x0+span, bot); cx.closePath(); cx.fill();
+}
+function ridgeY(wx, base, amp, seed){
+  return base + amp*(0.55*Math.sin(wx*0.0031+seed) + 0.28*Math.sin(wx*0.007+seed*1.7) + 0.17*Math.sin(wx*0.013+seed*0.6));
+}
+
+/** Soft painted conifer — BD b311c69 */
+function drawConifer(x, y, h, body, snow, dense){
+  if(h < 3.5) return;
+  const w = h * 0.38, skew = (hash01(x*0.17+y*0.09)-0.5)*w*0.35;
+  cx.fillStyle = '#4a3a2a';
+  cx.fillRect(x - h*0.04, y - h*0.12, h*0.08, h*0.14);
+  cx.fillStyle = body;
+  cx.beginPath();
+  cx.moveTo(x + skew*0.2, y - h);
+  cx.lineTo(x + w + skew, y - h*0.38);
+  cx.lineTo(x + w*0.28, y - h*0.38);
+  cx.lineTo(x + w*1.1 + skew*0.5, y);
+  cx.lineTo(x - w*1.05 + skew*0.3, y);
+  cx.lineTo(x - w*0.3, y - h*0.38);
+  cx.lineTo(x - w + skew, y - h*0.38);
+  cx.closePath(); cx.fill();
+  if(dense !== 0){
+    cx.fillStyle = snow; cx.globalAlpha = 0.48;
+    cx.beginPath();
+    cx.moveTo(x + skew*0.2, y - h);
+    cx.lineTo(x + w*0.4 + skew*0.3, y - h*0.5);
+    cx.lineTo(x - w*0.35 + skew*0.2, y - h*0.5);
+    cx.closePath(); cx.fill();
+    if(h > 10){
+      cx.beginPath();
+      cx.moveTo(x, y - h*0.55);
+      cx.lineTo(x + w*0.75 + skew*0.2, y - h*0.16);
+      cx.lineTo(x - w*0.7 + skew*0.2, y - h*0.16);
+      cx.closePath(); cx.fill();
     }
-    const tileBot=y+th;
-    // Soft-mask the hard tile edge: long painted snowfield starting well above tileBot
-    const snowTop=Math.min(tileBot - H*0.10, meetY - H*0.14);
-    const hg=cx.createLinearGradient(0, snowTop, 0, Math.max(meetY+H*0.05, tileBot+H*0.08));
-    hg.addColorStop(0,'rgba(140,120,112,0)');
-    hg.addColorStop(0.25,'rgba(170,155,148,0.40)');
-    hg.addColorStop(0.50,'rgba(190,200,208,0.82)');
-    hg.addColorStop(0.72,'rgba(200,210,218,0.96)');
-    hg.addColorStop(1,'rgba(200,210,218,1)');
-    cx.fillStyle=hg;
-    cx.fillRect(0, snowTop, W, H-snowTop);
-  } else {
-    // Storm cover + soft snowfield blend into the terrain meet line
-    const sc=Math.max(W/nw, H/nh)*1.06;
-    const tw=nw*sc, th=nh*sc;
-    const y=H-th;
-    const shift=((shiftBase)%tw+tw)%tw;
-    for(let x=-shift-tw; x<W+tw; x+=tw){
-      cx.drawImage(img, x, y, tw, th);
-    }
-    const snowTop=Math.min(H*0.55, meetY - H*0.08);
-    const hg=cx.createLinearGradient(0, snowTop, 0, H);
-    hg.addColorStop(0,'rgba(180,198,210,0)');
-    hg.addColorStop(0.35,'rgba(190,205,216,0.55)');
-    hg.addColorStop(0.65,'rgba(200,212,222,0.92)');
-    hg.addColorStop(1,'rgba(200,212,222,1)');
-    cx.fillStyle=hg;
-    cx.fillRect(0, snowTop, W, H-snowTop);
+    cx.globalAlpha = 1;
   }
 }
 
-/** Vertical camera: keep sled AND terrain surface on screen (no tilt). */
+/** BD trail cut — soft snow through a forest gap (never a standalone white tombstone). */
+function drawTrailCut(pts, halfW, snow, shade){
+  if(!pts || pts.length < 2) return;
+  let i, a, b, nx, ny, len, r;
+  cx.beginPath();
+  for(i=0;i<pts.length;i++){
+    a=pts[i]; b=pts[Math.min(i+1,pts.length-1)];
+    nx=-(b[1]-a[1]); ny=b[0]-a[0]; len=Math.sqrt(nx*nx+ny*ny)||1; nx/=len; ny/=len;
+    if(i===0) cx.moveTo(a[0]+nx*halfW, a[1]+ny*halfW); else cx.lineTo(a[0]+nx*halfW, a[1]+ny*halfW);
+  }
+  for(i=pts.length-1;i>=0;i--){
+    a=pts[i]; b=pts[Math.max(i-1,0)];
+    nx=-(a[1]-b[1]); ny=a[0]-b[0]; len=Math.sqrt(nx*nx+ny*ny)||1; nx/=len; ny/=len;
+    cx.lineTo(a[0]-nx*halfW, a[1]-ny*halfW);
+  }
+  cx.closePath();
+  const g=cx.createLinearGradient(pts[0][0], pts[0][1], pts[pts.length-1][0], pts[pts.length-1][1]);
+  g.addColorStop(0, snow); g.addColorStop(0.45, 'rgba(210,224,236,.55)'); g.addColorStop(1, snow);
+  cx.fillStyle=g; cx.globalAlpha=0.88; cx.fill(); cx.globalAlpha=1;
+  cx.strokeStyle='rgba(255,255,255,.35)'; cx.lineWidth=1.1; cx.stroke();
+  cx.strokeStyle='rgba(40,70,100,.12)'; cx.lineWidth=0.8;
+  for(r=-1;r<=1;r+=2){
+    cx.beginPath();
+    for(i=0;i<pts.length;i++){
+      a=pts[i]; b=pts[Math.min(i+1,pts.length-1)];
+      nx=-(b[1]-a[1]); ny=b[0]-a[0]; len=Math.sqrt(nx*nx+ny*ny)||1; nx/=len; ny/=len;
+      if(i===0) cx.moveTo(a[0]+nx*r*halfW*0.55, a[1]+ny*r*halfW*0.55);
+      else cx.lineTo(a[0]+nx*r*halfW*0.55, a[1]+ny*r*halfW*0.55);
+    }
+    cx.stroke();
+  }
+}
+function trailClear(x, y, trails, pad){
+  for(let t=0;t<trails.length;t++){
+    for(let i=0;i<trails[t].length-1;i++){
+      const a=trails[t][i], b=trails[t][i+1];
+      const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.sqrt(dx*dx+dy*dy)||1;
+      let tp=((x-a[0])*dx+(y-a[1])*dy)/(len*len);
+      if(tp<0) tp=0; else if(tp>1) tp=1;
+      const px=a[0]+dx*tp, py=a[1]+dy*tp;
+      if((x-px)*(x-px)+(y-py)*(y-py) < pad*pad) return true;
+    }
+  }
+  return false;
+}
+function inGlade(x, y, glades){
+  for(let g=0;g<glades.length;g++){
+    const dx=x-glades[g][0], dy=y-glades[g][1];
+    if(dx*dx/(glades[g][2]*glades[g][2])+dy*dy/(glades[g][3]*glades[g][3])<1) return true;
+  }
+  return false;
+}
+function buildTrails(x0, top, bot, zone, n){
+  const out=[];
+  // Long horizontal lean so cuts read as ski trails down the face — never short upright pills
+  const spread = zone==='meadow' ? 280 : 230;
+  const lean = zone==='creek' ? 160 : (zone==='meadow' ? 260 : 220);
+  const zig = zone==='dusk' ? 1.6 : 2.0;
+  for(let tr=0; tr<n; tr++){
+    const pts=[]; const ox=x0+50+tr*spread+((tr*47)%40);
+    for(let k=0;k<=14;k++){
+      const u=k/14;
+      pts.push([ox+u*lean+Math.sin(u*zig+tr*1.3)*14, top+10+u*(bot-top-28)+Math.sin(u*1.5+tr)*5]);
+    }
+    out.push(pts);
+  }
+  return out;
+}
+
+/** Clump forest — ~50% mid-slope cover with glades + trail corridors + ragged treeline. */
+function drawDenseForest(x0, span, topY, botY, forest, snowCol, trails, dens){
+  const faceH=botY-topY;
+  // Trees climb most of the face; open ridge is only the top ~12%
+  const treeTop=topY+faceH*0.12, treeBot=botY-faceH*0.04;
+  const glades=[];
+  const nG = dens>=2 ? 6 : 7; // glades keep ~50% open, not sparse empty mid
+  for(let gi=0; gi<nG; gi++){
+    glades.push([
+      x0+60+hash01(gi*11)*span*0.9,
+      treeTop+hash01(gi*19)*faceH*0.55,
+      30+hash01(gi*3)*40,
+      16+hash01(gi*7)*24
+    ]);
+  }
+  const wash=cx.createLinearGradient(0,treeTop,0,treeBot);
+  wash.addColorStop(0, rgba(hexRgb(forest[0]),0));
+  wash.addColorStop(0.35, rgba(hexRgb(forest[1]),0.18));
+  wash.addColorStop(0.8, rgba(hexRgb(forest[2]),0.22));
+  wash.addColorStop(1, rgba(hexRgb(forest[2]),0));
+  cx.fillStyle=wash; cx.fillRect(x0,treeTop,span,treeBot-treeTop);
+  const clumps=Math.floor(span/(dens>=2?26:32));
+  for(let c=0;c<clumps;c++){
+    if(hash01(c*3.7)<0.06) continue; // light skip → gaps between clumps
+    const cx0=x0+36+hash01(c*5.1)*(span-72);
+    const cy0=treeTop+10+hash01(c*9.3)*(treeBot-treeTop-22);
+    if(trailClear(cx0,cy0,trails,14)||inGlade(cx0,cy0,glades)) continue;
+    const nT=6+((hash01(c*2.2)*8)|0);
+    for(let k=0;k<nT;k++){
+      const ang=hash01(c*11+k*3)*6.28, rad=5+hash01(c+k*7)*20;
+      const x=cx0+Math.cos(ang)*rad, y=cy0+Math.sin(ang)*rad*0.55;
+      if(y<treeTop-4||y>treeBot) continue;
+      if(trailClear(x,y,trails,11)||inGlade(x,y,glades)) continue;
+      if(y<treeTop+faceH*0.04&&hash01(c+k)<0.5) continue; // ragged top
+      const tone=forest[hash01(c+k*2)<0.33?0:hash01(c+k)<0.7?1:2];
+      const h=(12+hash01(c*4+k)*24)*(0.72+hash01(k*3)*0.9);
+      drawConifer(x,y,h,tone,snowCol,1);
+    }
+  }
+  // Ragged treeline crowns along the ridge
+  for(let i=0;i<Math.floor(span/26);i++){
+    if(hash01(i*41)<0.38) continue;
+    const x=x0+i*26+hash01(i*9)*16;
+    const y=treeTop-2+hash01(i*17)*12;
+    if(trailClear(x,y,trails,12)||inGlade(x,y,glades)) continue;
+    drawConifer(x,y,10+hash01(i)*15,forest[0],snowCol,1);
+  }
+}
+
+function drawLodge(x, y, sc, look){
+  sc = sc || 1;
+  const bw = 58*sc, bh = 26*sc;
+  const warm = !!(look && look.dusk);
+  const sn = (look&&look.snow)||'#e8eef4';
+  cx.fillStyle = rgba(hexRgb(sn), 0.9);
+  cx.beginPath(); cx.ellipse(x+bw*0.45, y+bh+3*sc, bw*0.7, 6*sc, 0, 0, Math.PI*2); cx.fill();
+  cx.fillStyle = '#5c4a3a'; cx.fillRect(x, y, bw, bh);
+  cx.fillStyle = '#3e3028'; cx.fillRect(x - 2*sc, y + 1*sc, bw + 4*sc, 3*sc);
+  cx.fillStyle = '#f2f6fa';
+  cx.beginPath();
+  cx.moveTo(x - 11*sc, y + 3*sc);
+  cx.lineTo(x + bw*0.5, y - 20*sc);
+  cx.lineTo(x + bw + 11*sc, y + 3*sc);
+  cx.lineTo(x + bw + 7*sc, y + 9*sc);
+  cx.lineTo(x - 7*sc, y + 9*sc);
+  cx.closePath(); cx.fill();
+  cx.fillStyle = '#4a3c36'; cx.fillRect(x + bw*0.18, y - 26*sc, 7*sc, 16*sc);
+  cx.fillStyle = rgba([200,206,214], 0.4);
+  for(let s=0;s<4;s++){
+    cx.beginPath();
+    cx.ellipse(x + bw*0.22 + s*2.4*sc, y - 30*sc - s*5.5*sc, 3.4*sc + s, 2.1*sc, 0, 0, Math.PI*2);
+    cx.fill();
+  }
+  cx.fillStyle = '#3a2a20';
+  cx.fillRect(x + bw*0.44, y + bh*0.32, 9*sc, bh*0.68);
+  cx.fillStyle = warm ? 'rgba(255,200,110,0.95)' : 'rgba(170,215,235,0.85)';
+  cx.fillRect(x + 8*sc, y + 8*sc, 11*sc, 9*sc);
+  cx.fillRect(x + bw - 20*sc, y + 8*sc, 11*sc, 9*sc);
+  if(warm){
+    cx.fillStyle = 'rgba(255,220,140,0.30)';
+    cx.beginPath(); cx.ellipse(x + bw*0.45, y + bh*0.4, bw*0.55, bh*0.5, 0, 0, Math.PI*2); cx.fill();
+  }
+}
+function drawTruck(x, y, sc){
+  sc = sc || 1;
+  cx.fillStyle = 'rgba(200,220,235,0.35)';
+  cx.beginPath(); cx.ellipse(x + 30*sc, y + 3*sc, 42*sc, 3.5*sc, 0, 0, Math.PI*2); cx.fill();
+  cx.fillStyle = '#343e48'; cx.fillRect(x + 24*sc, y - 11*sc, 44*sc, 13*sc);
+  cx.fillStyle = '#2a323a'; cx.fillRect(x + 26*sc, y - 14*sc, 40*sc, 4*sc);
+  cx.fillStyle = '#4a5560'; cx.fillRect(x, y - 13*sc, 26*sc, 15*sc);
+  cx.fillStyle = '#5a6570'; cx.fillRect(x + 2*sc, y - 20*sc, 15*sc, 9*sc);
+  cx.fillStyle = 'rgba(160,200,220,0.75)'; cx.fillRect(x + 4*sc, y - 18*sc, 9*sc, 5*sc);
+  cx.strokeStyle = '#2a323a'; cx.lineWidth = 2*sc;
+  cx.beginPath(); cx.moveTo(x + 24*sc, y - 4*sc); cx.lineTo(x + 28*sc, y - 4*sc); cx.stroke();
+  cx.fillStyle = '#141a22';
+  [[8,2],[20,2],[36,2],[54,2]].forEach(([wx,wy])=>{
+    cx.beginPath(); cx.arc(x + wx*sc, y + wy*sc, 3.6*sc, 0, Math.PI*2); cx.fill();
+  });
+}
+
+/**
+ * BD resort-face backdrop adapted for backcountry:
+ * far ridges + mid snow face + clump forest + trail-cut chutes + haze + near pines.
+ * Landmarks: hut, truck, creek ribbon. No lifts/lodge crowds.
+ */
+function drawBackdrop(camX, terrainScreenY){
+  const look = settingLook(BG.key);
+  const zone = look.zone || look.id;
+  const meetY = Math.max(H*0.50, Math.min(H*0.78, terrainScreenY!=null ? terrainScreenY : H*0.62));
+  const landscape = W > H;
+  const farP=0.14, midP=0.38, nearP=0.68;
+  const snow = look.snow || '#d8e6f0';
+  const forest = look.forest || ['#2a4a38','#3d6a4e','#5a8a68'];
+  const ms = look.midSnow || [snow, look.shade || '#a8c0d4'];
+
+  // Sky
+  const sky = look.sky;
+  const ug = cx.createLinearGradient(0, 0, 0, meetY);
+  if(look.dusk){
+    ug.addColorStop(0, sky[0]); ug.addColorStop(0.38, sky[1]); ug.addColorStop(0.75, sky[2]); ug.addColorStop(1, snow);
+  } else {
+    ug.addColorStop(0, sky[0]); ug.addColorStop(0.5, sky[1]); ug.addColorStop(1, sky[2]);
+  }
+  cx.fillStyle = ug; cx.fillRect(0, 0, W, H);
+  if(look.dusk){
+    cx.fillStyle = 'rgba(255,170,110,0.30)';
+    cx.beginPath(); cx.arc(W*0.78, H*0.12, 36, 0, Math.PI*2); cx.fill();
+    cx.fillStyle = 'rgba(255,220,170,0.50)';
+    cx.beginPath(); cx.arc(W*0.78, H*0.12, 13, 0, Math.PI*2); cx.fill();
+  }
+
+  // FAR mountain face — snow ridges + faint distant trees (not an empty grey stripe)
+  const farScroll = camX * farP;
+  const farTop = H * (landscape ? 0.14 : 0.18);
+  fillBand(-40, W+80, (x)=>ridgeY(x+farScroll, farTop, landscape?22:28, 1.1), meetY, look.far[0]);
+  fillBand(-40, W+80, (x)=>ridgeY(x+farScroll, farTop+14, landscape?14:18, 2.3), meetY, look.far[1]);
+  // Faint distant treeline on the far mountain face (readable through haze)
+  for(let i=0;i<Math.floor(W/22);i++){
+    if(hash01(i*13+3)<0.28) continue;
+    const fx = 8 + i*22 + hash01(i*7)*14 - farScroll*0.3;
+    if(fx<-20||fx>W+20) continue;
+    const fy = ridgeY(fx+farScroll, farTop+18, 12, 2.1) + 8;
+    cx.globalAlpha = 0.55;
+    drawConifer(fx, fy, 6+hash01(i)*9, forest[0], look.tint||snow, 0);
+    if(hash01(i*5)>0.55) drawConifer(fx+7, fy+2, 4+hash01(i*3)*6, forest[1], snow, 0);
+    cx.globalAlpha = 1;
+  }
+  const haze1 = cx.createLinearGradient(0, farTop, 0, meetY*0.55);
+  haze1.addColorStop(0, rgba(look.fog||[220,230,240], 0.22));
+  haze1.addColorStop(0.55, rgba(look.fog||[220,230,240], 0.10));
+  haze1.addColorStop(1, rgba(look.fog||[220,230,240], 0));
+  cx.fillStyle = haze1; cx.fillRect(0, farTop-8, W, meetY*0.45);
+
+  // MID snow face — scroll-wrapped; forest climbs to a ragged ridge (~50% treed)
+  const midScroll = (camX * 0.16) % 2200;
+  const x0 = -midScroll - 80;
+  const span = W + 2400;
+  const faceTop = meetY - (landscape ? 148 : 178);
+  const faceBot = meetY + 6;
+  fillBand(x0, span, (x)=>ridgeY(x+midScroll, faceTop, 28, 0.8), faceBot, ms[1]);
+  fillBand(x0, span, (x)=>ridgeY(x+midScroll, faceTop+16, 18, 1.9), faceBot, ms[0]);
+  const face = cx.createLinearGradient(0, faceTop, 0, faceBot);
+  face.addColorStop(0,'rgba(255,255,255,.18)'); face.addColorStop(0.3,'rgba(255,255,255,.05)');
+  face.addColorStop(0.7,'rgba(50,80,110,.10)'); face.addColorStop(1,'rgba(50,80,110,.18)');
+  cx.fillStyle = face; cx.fillRect(x0, faceTop-8, span, faceBot-faceTop+16);
+
+  // Trail cuts through forest band (BD order), then ~50% clump forest
+  const dens = 2;
+  const forestBot = faceBot - (zone==='creek' ? 40 : zone==='meadow' ? 8 : 4);
+  const trailN = zone==='meadow' ? 1 : (zone==='creek' ? 0 : 2);
+  const faceH = forestBot - (faceTop+2);
+  const treeTop = faceTop+2 + faceH*0.12; // chutes start where trees start
+  const trails = buildTrails(x0 + (zone==='creek'?380:0), treeTop, forestBot, zone, trailN);
+  for(let tr=0; tr<trails.length; tr++) drawTrailCut(trails[tr], zone==='meadow'?5.5:5, ms[0], look.shade||'#8aa0b0');
+  drawDenseForest(x0, span, faceTop+2, forestBot, forest, look.tint||snow, trails, dens);
+
+  // Soft ridge haze — keeps far mountain readable (not a flat grey wipe)
+  const atmo = cx.createLinearGradient(0, faceTop-14, 0, faceTop+36);
+  atmo.addColorStop(0, rgba(look.fog||[220,230,240], 0.28));
+  atmo.addColorStop(1, rgba(look.fog||[220,230,240], 0));
+  cx.fillStyle = atmo; cx.fillRect(x0, faceTop-16, span, 42);
+
+  // —— BC landmarks (no lifts) ——
+  const wrapX = (base, period)=>{
+    let x = ((base - midScroll) % period + period) % period;
+    if(x > period*0.85) x -= period;
+    return x;
+  };
+  if(zone==='trailhead'){
+    const hx = wrapX(180, 700);
+    if(hx > -80 && hx < W+80) drawLodge(hx, faceBot-52, 1.05, look);
+  }
+  if(zone==='meadow'){
+    const fy = meetY - 16;
+    cx.strokeStyle = 'rgba(120,90,60,0.55)'; cx.lineWidth = 1.4;
+    for(let i=0;i<18;i++){
+      const sx = x0 + i*72 + 14;
+      if(sx < -10 || sx > W+10) continue;
+      cx.beginPath(); cx.moveTo(sx, fy); cx.lineTo(sx, fy+14); cx.stroke();
+      if(i%2===0){ cx.beginPath(); cx.moveTo(sx, fy+5); cx.lineTo(sx+72, fy+5); cx.stroke(); }
+    }
+    const hx = wrapX(220, 700);
+    if(hx > -80 && hx < W+80) drawLodge(hx, fy - 30, 0.95, look);
+  }
+  if(zone==='creek'){
+    // Narrow winding ice ribbon (keep)
+    const cy = meetY - 24;
+    const ice = look.ice || '#b0d4e4';
+    const creekY = (x)=> cy + Math.sin((x+midScroll)*0.014)*4.5 + Math.sin((x+midScroll)*0.033)*2.5;
+    cx.fillStyle = rgba(hexRgb(snow), 0.7);
+    cx.beginPath(); cx.moveTo(-20, cy+14);
+    for(let x=-20;x<=W+20;x+=18) cx.lineTo(x, creekY(x)-6);
+    for(let x=W+20;x>=-20;x-=18) cx.lineTo(x, creekY(x)-11);
+    cx.closePath(); cx.fill();
+    cx.beginPath(); cx.moveTo(-20, cy+16);
+    for(let x=-20;x<=W+20;x+=18) cx.lineTo(x, creekY(x)+6);
+    for(let x=W+20;x>=-20;x-=18) cx.lineTo(x, creekY(x)+11);
+    cx.closePath(); cx.fill();
+    cx.beginPath();
+    for(let x=-20;x<=W+20;x+=14){
+      const y=creekY(x), half=3.2+Math.sin((x+midScroll)*0.021)*0.8;
+      if(x===-20) cx.moveTo(x,y-half); else cx.lineTo(x,y-half);
+    }
+    for(let x=W+20;x>=-20;x-=14){
+      const y=creekY(x), half=3.2+Math.sin((x+midScroll)*0.021)*0.8;
+      cx.lineTo(x,y+half);
+    }
+    cx.closePath(); cx.fillStyle = ice; cx.fill();
+    cx.strokeStyle = 'rgba(255,255,255,0.40)'; cx.lineWidth = 0.7;
+    for(let c=0;c<6;c++){
+      const cx0 = 80 + c*130 + hash01(c)*30;
+      const cy0 = creekY(cx0);
+      cx.beginPath(); cx.moveTo(cx0-2, cy0); cx.lineTo(cx0+8+hash01(c*2)*6, cy0+(hash01(c*7)-0.5)*2.5); cx.stroke();
+    }
+  }
+  if(zone==='dusk'){
+    for(let rb=0; rb<4; rb++){
+      const ry = faceTop + 22 + rb*18;
+      const rx = wrapX(140 + rb*160, 700);
+      cx.fillStyle = look.rock ? look.rock[rb%3] : '#8a8496';
+      cx.globalAlpha = 0.5;
+      cx.beginPath();
+      cx.moveTo(rx, ry); cx.lineTo(rx+55+rb*4, ry+3); cx.lineTo(rx+42, ry+11); cx.lineTo(rx-4, ry+8);
+      cx.closePath(); cx.fill(); cx.globalAlpha = 1;
+    }
+    const hx = wrapX(260, 700);
+    if(hx > -80 && hx < W+80) drawLodge(hx, faceBot-48, 1.05, look);
+  }
+
+  // NEAR painted pines — sparse clumps (not an edge-to-edge picket wall)
+  const nearScroll = (camX * 0.34) % 1400;
+  const nx0 = -nearScroll - 50;
+  const edge = meetY - (landscape ? 16 : 26);
+  const sh = cx.createLinearGradient(0, edge - 30, 0, meetY + 16);
+  sh.addColorStop(0, 'rgba(255,255,255,0)');
+  sh.addColorStop(0.55, rgba(hexRgb(snow), 0.16));
+  sh.addColorStop(1, 'rgba(50,80,110,0.08)');
+  cx.fillStyle = sh; cx.fillRect(nx0, edge - 30, W+1600, meetY - edge + 46);
+
+  // Sparse near accents only — mid clump forest does the mass (avoid second picket wall)
+  const nTree = zone==='creek' ? 5 : (zone==='meadow' ? 6 : 8);
+  const step = zone==='creek' ? 120 : (zone==='meadow' ? 100 : 88);
+  for(let i=0; i<nTree; i++){
+    if(hash01(i*11 + zone.length)<0.35) continue;
+    const tx = nx0 + i*step + hash01(i*9)*28;
+    if(tx < -40 || tx > W+40) continue;
+    if(zone==='trailhead' && tx > W*0.45 && tx < W*0.88) continue;
+    const th = 18 + hash01(i*3)*14;
+    drawConifer(tx, edge + 10, th, forest[2], look.tint||snow, 1);
+  }
+
+  const veilTop = meetY - (landscape ? H*0.08 : H*0.10);
+  const veil = cx.createLinearGradient(0, veilTop, 0, meetY + 2);
+  veil.addColorStop(0, rgba(hexRgb(snow), 0));
+  veil.addColorStop(0.55, rgba(hexRgb(snow), 0.14));
+  veil.addColorStop(1, rgba(hexRgb(snow), 0.40));
+  cx.fillStyle = veil;
+  cx.fillRect(0, veilTop, W, meetY + 2 - veilTop);
+
+  if(typeof window !== 'undefined'){
+    window.__BC_PLATE = {
+      meetY, landscape, key: look.id, name: look.name, zone,
+      farP, midP, nearP, platesDropped: true, veilTop, bdPort: 'b311c69'
+    };
+  }
+}
+
+
 function computeCam(p){
   const focusX=W*0.42;
   const camX=p.x-focusX;
   const gy=groundY(p.x);
-  // Bias: show a solid band of ground under the sled (especially in air)
+  const landscape = W > H;
   const airGap=Math.max(0, gy-p.y);
-  const sledFrac = p.on ? 0.46 : Math.min(0.40, 0.32 + airGap/(H*2.2));
+  const sledFrac = (!p.on)
+    ? Math.min(0.40, 0.32 + airGap/(H*2.2))
+    : (landscape ? 0.38 : 0.46);
   let targetCamY = p.y - H*sledFrac;
 
-  // Terrain surface sits mid-low so snow mass + props read clearly
-  const gMin=H*0.58, gMax=H*0.74;
+  const gMin = landscape ? H*0.64 : H*0.58;
+  const gMax = landscape ? H*0.78 : H*0.74;
   let gScreen=gy - targetCamY;
   if(gScreen > gMax) targetCamY = gy - gMax;
   if(gScreen < gMin) targetCamY = gy - gMin;
 
-  // Keep sled on screen above the ground line
   let sScreen=p.y - targetCamY;
+  const sMax = landscape ? 0.60 : 0.52;
   if(sScreen < H*0.14) targetCamY = p.y - H*0.14;
-  if(sScreen > H*0.52) targetCamY = p.y - H*0.52;
+  if(sScreen > H*sMax) targetCamY = p.y - H*sMax;
 
-  // Ground wins if sled clamp pushed it off
   gScreen=gy - targetCamY;
   if(gScreen > H*0.82) targetCamY = gy - H*0.82;
-  if(gScreen < H*0.55) targetCamY = gy - H*0.55;
+  const gFloor = landscape ? H*0.58 : H*0.50;
+  if(gScreen < gFloor) targetCamY = gy - gFloor;
 
   if(camSmoothY==null) camSmoothY=targetCamY;
   camSmoothY += (targetCamY - camSmoothY) * (SHOT ? 1 : 0.2);
@@ -647,7 +1493,6 @@ function computeCam(p){
   return lastCam;
 }
 
-/** Subtle lip face wash — same snow palette, never a floating white wedge. */
 function drawSnowLipShades(camX, camY){
   for(const [cx0,w,amp] of LIPS){
     if(cx0+w < camX-20 || cx0 > camX+W+20) continue;
@@ -672,7 +1517,16 @@ function drawSnowLipShades(camX, camY){
 function draw(){
   if(!S) return;
   const p=S.p;
-  const cam=computeCam(p);
+  let cam=computeCam(p);
+  if(SHOT==='rocks' && window.__BC_ROCKS_SHOT){
+    const mid=window.__BC_ROCKS_SHOT.mid;
+    const camX=mid - W*0.50;
+    const gy=groundY(mid);
+    const camY=gy - H*0.55;
+    camSmoothY=camY;
+    cam={x:camX, y:camY, groundScreenY:gy-camY, sledScreenY:p.y-camY};
+    lastCam=cam;
+  }
   const camX=cam.x, camY=cam.y;
 
   drawBackdrop(camX, cam.groundScreenY);
@@ -680,7 +1534,6 @@ function draw(){
   cx.save();
   cx.translate(-camX, -camY);
 
-  // Snow mass — distinct cool body so ground reads as ground (not UI void)
   const x0=camX-40, x1=camX+W+40;
   cx.beginPath();
   cx.moveTo(x0, camY+H+280);
@@ -688,53 +1541,77 @@ function draw(){
   for(let x=x0;x<=x1;x+=5) cx.lineTo(x, groundY(x));
   cx.lineTo(x1, camY+H+280);
   cx.closePath();
+  const lookSnow=settingLook(BG.key);
+  const sn0=lookSnow.snow||'#d8e6f0';
+  const sn1=lookSnow.tint||'#b9cce0';
+  const sn2=lookSnow.shade||'#9eb6cc';
   const snowBody=cx.createLinearGradient(0, cam.groundScreenY + camY - 4, 0, camY+H);
-  snowBody.addColorStop(0,'#d2e0ec');
-  snowBody.addColorStop(0.55,'#b9cce0');
-  snowBody.addColorStop(1,'#9eb6cc');
+  snowBody.addColorStop(0, sn0);
+  snowBody.addColorStop(0.55, sn1);
+  snowBody.addColorStop(1, sn2);
   cx.fillStyle=snowBody;
   cx.fill();
 
-  // Single surface highlight (not contour streaks)
   cx.beginPath();
   for(let x=x0;x<=x1;x+=5){
     const y=groundY(x);
     if(x===x0) cx.moveTo(x,y); else cx.lineTo(x,y);
   }
-  cx.strokeStyle='rgba(255,255,255,.7)';
-  cx.lineWidth=2.4;
+  cx.strokeStyle='rgba(255,255,255,.26)';
+  cx.lineWidth=2.2;
+  cx.lineCap='round';
+  cx.lineJoin='round';
   cx.stroke();
 
   drawSnowLipShades(camX, camY);
 
-  // Fixed world-x pines — scroll 1:1 with snow; sit on base slope (never a kicker)
-  // At most ~1–2 visible per screen. Never welded to the sled.
+  const lookPlace=settingLook(BG.key);
+  if((lookPlace.zone||lookPlace.id)==='trailhead'){
+    const twx=560;
+    if(twx>camX-80 && twx<camX+W+80){
+      const tgy=baseGroundY(twx);
+      // Soft snowy berms only — no grey rectangle road band
+      cx.strokeStyle=rgba(hexRgb(lookPlace.snow||'#d8e6f0'),0.85); cx.lineWidth=4; cx.lineCap='round';
+      cx.beginPath(); cx.moveTo(twx-36, tgy-5); cx.quadraticCurveTo(twx+30, tgy-7, twx+96, tgy-4); cx.stroke();
+      cx.beginPath(); cx.moveTo(twx-36, tgy+5); cx.quadraticCurveTo(twx+30, tgy+6, twx+96, tgy+4); cx.stroke();
+      drawTruck(twx, tgy-1, 1.35);
+      cx.fillStyle='#4a3a28'; cx.fillRect(twx+100, tgy-42, 3, 42);
+      cx.fillStyle='#c8b090'; cx.fillRect(twx+86, tgy-54, 34, 14);
+      cx.fillStyle='#2a2018'; cx.font='700 8px Sora,sans-serif'; cx.textAlign='center';
+      cx.fillText('TRAIL', twx+103, tgy-44);
+    }
+  }
+
+  const pineCap=2;
   let pinesDrawn=0;
+  const lookPine=lookPlace;
+  const fcols=lookPine.forest||['#2a4a38','#3d6a4e','#5a8a68'];
+  const pineSnow=lookPine.snow||'#d8e6f0';
   for(const pn of S.pines){
     if(pn.x<camX-40 || pn.x>camX+W+40) continue;
-    if(pinesDrawn>=2) break;
+    if(pinesDrawn>=pineCap) break;
     const gy=baseGroundY(pn.x);
-    blitWorld('pine_tall', pn.x, gy+3, baseSlopeAt(pn.x)*0.15, {s:pn.s||0.95});
+    const th=48*(pn.s||0.95);
+    // Seat on slope with snow mound + contact shadow (not pasted)
+    cx.fillStyle='rgba(35,50,65,0.28)';
+    cx.beginPath(); cx.ellipse(pn.x+3, gy+4, th*0.28, 4.2, 0.05, 0, Math.PI*2); cx.fill();
+    cx.fillStyle=pineSnow;
+    cx.beginPath(); cx.ellipse(pn.x, gy+1.5, th*0.34, 6.0, 0, 0, Math.PI*2); cx.fill();
+    drawConifer(pn.x, gy+1, th, fcols[2], lookPine.tint||pineSnow, 1);
     pinesDrawn++;
   }
   window.__BC_PINES_VISIBLE = S.pines
     .filter(pn=>pn.x>=camX-40 && pn.x<=camX+W+40)
-    .slice(0,2)
+    .slice(0, pineCap)
     .map(pn=>({x:pn.x, baseY:baseGroundY(pn.x), screenX:pn.x-camX, onFeature:onFeatureSpan(pn.x)}));
 
-  // Boulders — half-buried on seated slopes/flats
+  window.__BC_ROCK_BBOX = [];
   for(const b of S.boulders){
     if(b.x<camX-40||b.x>camX+W+40||b.hit) continue;
-    const bury=b.bury||0.45;
-    const gy=groundY(b.x);
-    blitWorld('boulder', b.x, gy + b.r*0.22, b.spin*0.12, {s: b.r/28, clipBottom:bury*0.6});
-    cx.fillStyle='rgba(200,216,228,.7)';
-    cx.beginPath();
-    cx.ellipse(b.x, gy+3, b.r*0.9, Math.max(4,b.r*0.2), 0, 0, Math.PI*2);
-    cx.fill();
+    drawBoulder(b);
   }
+  if(SHOT) assertRockBboxWidth();
 
-  // Finish
   if(LEVEL_LEN>camX && LEVEL_LEN<camX+W+80){
     const fx=LEVEL_LEN, fy=groundY(fx);
     cx.fillStyle='#2a2018'; cx.fillRect(fx-4,fy-90,6,90); cx.fillRect(fx+40,fy-90,6,90);
@@ -745,14 +1622,25 @@ function draw(){
 
   const airWobble = (!p.on && p.trick) ? Math.sin(S.t*9)*0.04 : 0;
   blitSled(p.x, p.y, p.ang + airWobble);
-  if(p.on || p.y>groundY(p.x)-8){
+  if(S.crashed){
+    drawCrashPuff(p);
+  } else if(p.on || p.y>groundY(p.x)-8){
     cx.fillStyle='rgba(30,50,70,.18)';
     cx.beginPath(); cx.ellipse(p.x, groundY(p.x)+2, 28, 5, 0, 0, Math.PI*2); cx.fill();
   }
 
   cx.restore();
 
-  // Light flakes (screen space)
+  if(S.throtGlow>0.02 && !SHOT){
+    const ag=cx.createLinearGradient(0,0,W*0.55,0);
+    const a0=0.28*S.throtGlow, a1=0.10*S.throtGlow;
+    ag.addColorStop(0,`rgba(94,196,168,${a0})`);
+    ag.addColorStop(0.45,`rgba(94,196,168,${a1})`);
+    ag.addColorStop(1,'rgba(94,196,168,0)');
+    cx.fillStyle=ag;
+    cx.fillRect(0,0,W*0.55,H);
+  }
+
   cx.fillStyle='rgba(255,255,255,.40)';
   for(let i=0;i<22;i++){
     const fx=(i*97+S.t*30)%W, fy=(i*53+S.t*40)%(H*0.55);
@@ -763,18 +1651,205 @@ function draw(){
     cx.fillStyle=`rgba(255,255,255,${S.landFlash*0.18})`;
     cx.fillRect(0,0,W,H);
   }
+
+  drawTrickMeter();
+  drawScorePops();
 }
 
-/**
- * Detect exposed flat clear/lavender bands (broken backdrop), not dusk mountain hues.
- * Looks for low-variance purple/lavender strips across the mid-lower frame.
- */
+function fillRoundRect(x,y,w,h,r){
+  const rr=Math.min(r, w/2, h/2);
+  cx.beginPath();
+  cx.moveTo(x+rr,y);
+  cx.arcTo(x+w,y,x+w,y+h,rr);
+  cx.arcTo(x+w,y+h,x,y+h,rr);
+  cx.arcTo(x,y+h,x,y,rr);
+  cx.arcTo(x,y,x+w,y,rr);
+  cx.closePath();
+  cx.fill();
+}
+
+function drawTrickMeter(){
+  if(!S||!S.meter.active) return;
+  const m=S.meter;
+  const h=Math.min(H*0.42, 280);
+  const w=Math.max(18, Math.min(28, W*0.055));
+  const fsLab=Math.max(14, Math.min(18, W*0.045));
+  const x=Math.max(14, W*0.035);
+  const y=H*0.20;
+  const g=cx.createLinearGradient(0,y,0,y+h);
+  g.addColorStop(0,'rgba(232,242,246,.22)');
+  g.addColorStop(1,'rgba(232,242,246,.34)');
+  cx.fillStyle=g;
+  fillRoundRect(x, y, w, h, w*0.45);
+  const g0=y+h*(1-METER_GREEN[1]), g1=y+h*(1-METER_GREEN[0]);
+  cx.fillStyle='rgba(64, 200, 140, 0.55)';
+  cx.fillRect(x-2, g0, w+4, Math.max(4, g1-g0));
+  const z0=y+h*(1-METER_GOLD[1]), z1=y+h*(1-METER_GOLD[0]);
+  cx.fillStyle='rgba(240, 180, 41, 0.85)';
+  cx.fillRect(x-3, z0, w+6, Math.max(3, z1-z0));
+  const fillH=h*Math.max(0, Math.min(1, m.level));
+  const fg=cx.createLinearGradient(0, y+h-fillH, 0, y+h);
+  fg.addColorStop(0,'#e8f2f6');
+  fg.addColorStop(1,'#5ec4a8');
+  cx.fillStyle=fg;
+  fillRoundRect(x+2, y+h-fillH, w-4, fillH, (w-4)*0.4);
+  const ny=y+h*(1-m.level);
+  cx.strokeStyle='#fff';
+  cx.lineWidth=2.5;
+  cx.beginPath();
+  cx.moveTo(x-8, ny); cx.lineTo(x+w+8, ny);
+  cx.stroke();
+  const labelX=x+w+12;
+  cx.textAlign='left';
+  cx.shadowColor='rgba(0,0,0,.85)'; cx.shadowBlur=8;
+  const perfY=(z0+z1)/2 + fsLab*0.35;             // gold center
+  cx.fillStyle='#9aecd0';
+  cx.font=`800 ${fsLab}px Syne,Sora,sans-serif`;
+  cx.textBaseline='bottom';
+  cx.fillText('STICK IT', labelX, y + 2);          // pinned to meter top edge
+  cx.textBaseline='alphabetic';
+  cx.fillStyle='#f0b429';
+  cx.font=`800 ${fsLab}px Syne,Sora,sans-serif`;
+  cx.fillText('PERFECT', labelX, perfY);
+  cx.shadowBlur=0;
+}
+
+function drawOutlinedLabel(text, x, y, fill, sizePx){
+  cx.font=`800 ${sizePx}px Syne,Sora,sans-serif`;
+  cx.lineJoin='round';
+  cx.miterLimit=2;
+  cx.fillStyle='#000';
+  for(const [blur, oy, a] of [[2,0,0.95],[3,1,0.9],[16,2,0.85]]){
+    cx.shadowColor=`rgba(0,0,0,${a})`;
+    cx.shadowBlur=blur;
+    cx.shadowOffsetX=0;
+    cx.shadowOffsetY=oy;
+    cx.fillText(text, x, y);
+  }
+  cx.shadowBlur=0; cx.shadowOffsetY=0;
+  cx.lineWidth=Math.max(4.5, sizePx*0.22);
+  cx.strokeStyle='rgba(0,0,0,.92)';
+  cx.strokeText(text, x, y);
+  cx.fillStyle=fill;
+  cx.shadowColor='rgba(0,0,0,.75)';
+  cx.shadowBlur=10;
+  cx.shadowOffsetY=2;
+  cx.fillText(text, x, y);
+  cx.shadowBlur=0; cx.shadowOffsetY=0;
+}
+
+function resultCardBand(){
+  const portrait = H >= W;
+  return {
+    y0: H * (portrait ? 0.18 : 0.25),
+    y1: H * (portrait ? 0.24 : 0.32)
+  };
+}
+
+function hudRects(){
+  const live = Math.abs(innerWidth-W)<4 && Math.abs(innerHeight-H)<4;
+  if(live){
+    const nodes = [
+      document.querySelector('#hud .L h1'),
+      document.getElementById('sub'),
+      document.querySelector('#hud .L'),
+      document.querySelector('#hud .R'),
+      document.getElementById('hearts')
+    ].filter(Boolean);
+    return nodes.map(el=>{
+      const r=el.getBoundingClientRect();
+      return {x:r.left, y:r.top, w:r.width, h:r.height, bottom:r.bottom, right:r.right};
+    });
+  }
+  const top = 10;
+  const leftH = H>W ? 78 : 58;
+  return [
+    {x:12, y:top, w:Math.min(240, W*0.55), h:leftH, bottom:top+leftH, right:12+Math.min(240,W*0.55)},
+    {x:W-128, y:top, w:116, h:44, bottom:top+44, right:W-12}
+  ];
+}
+
+function rectsIntersect(a,b){
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+function drawScorePops(){
+  window.__BC_CARD_RECT=null;
+  if(!scorePops.length) return;
+  const sledY = (lastCam && lastCam.sledScreenY!=null) ? lastCam.sledScreenY : H*0.45;
+  const sledX = S && S.p ? (S.p.x - (lastCam ? lastCam.x : 0)) : W*0.5;
+  const band = resultCardBand();
+  let baseY = (band.y0 + band.y1) * 0.5;
+  let baseX = W*0.5;
+  const pines = (typeof window!=='undefined' && window.__BC_PINES_VISIBLE) || [];
+  const blockers = [
+    ...(sledY < band.y1 + 40 ? [{x:sledX, r:W*0.16}] : []),
+    ...pines.map(pn=>({x:pn.screenX, r:H>W ? 70 : 100}))
+  ];
+  const blocked = (x)=>blockers.some(b=>Math.abs(b.x-x)<b.r);
+  if(blocked(baseX)){
+    const cand=[W*0.62, W*0.38, W*0.70, W*0.30];
+    baseX = cand.find(x=>!blocked(x)) || baseX;
+  }
+  const labSize=Math.max(17, Math.min(22, W*0.052));
+  cx.font=`800 ${labSize}px Syne,Sora,sans-serif`;
+  const sampleLab=(scorePops[0]&&scorePops[0].lab)||'UNDER-ROTATED';
+  const halfW=(cx.measureText(sampleLab).width||120)/2;
+  baseX=Math.max(halfW+10, Math.min(W-halfW-10, baseX));
+  const hudBottom = Math.max(...hudRects().map(r=>r.bottom), H*0.10);
+  baseY = Math.max(band.y0, Math.min(band.y1, baseY));
+  if(baseY - labSize < hudBottom + 6) baseY = Math.min(band.y1, hudBottom + 6 + labSize);
+  if(sledY < baseY + labSize) baseY = Math.min(band.y1, Math.max(band.y0, sledY - labSize - 8));
+
+  let cardBottom = baseY;
+  for(const sp of scorePops){
+    const a=Math.min(1, sp.t*1.5);
+    cx.save();
+    cx.globalAlpha=a;
+    cx.textAlign='center';
+    cx.textBaseline='alphabetic';
+    drawOutlinedLabel(sp.lab, baseX, baseY, sp.perfect?'#f0b429':'#e8f2f6', labSize);
+    cardBottom = baseY;
+    if(sp.pts!=null){
+      const ptsSize=Math.max(15, Math.min(20, W*0.045));
+      drawOutlinedLabel('+'+sp.pts, baseX, baseY + labSize + 4, '#5ec4a8', ptsSize);
+      cardBottom = baseY + labSize + 4;
+    }
+    cx.restore();
+  }
+  const pad = labSize * 0.35;
+  window.__BC_CARD_RECT = {
+    x: baseX - halfW - pad,
+    y: baseY - labSize - pad,
+    w: halfW*2 + pad*2,
+    h: (cardBottom - (baseY - labSize)) + pad*2,
+    baseX, baseY, labSize, band
+  };
+}
+
+function assertCardClearsHud(){
+  const card = window.__BC_CARD_RECT;
+  if(!card) return {ok:true, skipped:true};
+  const hud = hudRects();
+  const hits = hud.filter(r=>rectsIntersect(card, {x:r.x,y:r.y,w:r.w,h:r.h}));
+  const band = resultCardBand();
+  const inBand = card.baseY >= band.y0 - 1 && card.baseY <= band.y1 + 1;
+  return {
+    ok: hits.length===0 && inBand,
+    hits: hits.length,
+    inBand,
+    card,
+    band,
+    hudBottom: Math.max(...hud.map(r=>r.bottom), 0),
+    landscape: W>H
+  };
+}
+
 function visualClearCheck(){
   try{
     const data=cx.getImageData(0,0,cv.width,cv.height).data;
     const ww=cv.width, hh=cv.height;
     let bandHits=0, rows=0;
-    // Scan mid-lower rows (where broken alpenglow slabs appeared)
     for(let yCss=Math.floor(H*0.40); yCss<Math.floor(H*0.92); yCss+=6){
       const y=(yCss*DPR)|0;
       let purp=0, n=0, sumR=0,sumG=0,sumB=0;
@@ -783,7 +1858,6 @@ function visualClearCheck(){
         const i=(y*ww+x)*4;
         const r=data[i], g=data[i+1], b=data[i+2];
         n++; sumR+=r; sumG+=g; sumB+=b;
-        // Flat lavender / dark purple clear (high blue vs red+green, mid value)
         const lavender = b>r+18 && b>g+18 && r>70 && r<175 && g>70 && g<160 && b>110 && b<190
           && Math.abs(r-g)<28;
         const darkPurp = r>=35&&r<=85 && g>=28&&g<=70 && b>=75&&b<=140 && b>r+28 && b>g+28;
@@ -792,7 +1866,6 @@ function visualClearCheck(){
       if(!n) continue;
       rows++;
       const ar=sumR/n, ag=sumG/n, ab=sumB/n;
-      // Row is a bad band if many purple samples AND low chroma variance (flat fill)
       let varSum=0;
       for(let xCss=4; xCss<W-4; xCss+=10){
         const x=(xCss*DPR)|0; const i=(y*ww+x)*4;
@@ -808,13 +1881,13 @@ function visualClearCheck(){
 }
 window.__BC_visualClearCheck=visualClearCheck;
 
-/** Terrain surface must stay on screen in every airborne frame. */
 function terrainOnScreenCheck(){
   if(!S) return {ok:false};
-  const cam=lastCam.groundScreenY!=null ? lastCam : computeCam(S.p);
+  camSmoothY=null;
+  const cam=computeCam(S.p);
   const gY=cam.groundScreenY;
   const sY=cam.sledScreenY;
-  const ok = gY>=H*0.52 && gY<=H*0.85 && sY>=H*0.12 && sY<=H*0.55 && gY>sY+12;
+  const ok = gY>=H*0.48 && gY<=H*0.88 && sY>=H*0.10 && sY<=H*0.58 && gY>sY+10;
   return {
     ok, airborne:!S.p.on, groundScreenY:gY, sledScreenY:sY, H, W,
     fracGround:gY/H, fracSled:sY/H
@@ -836,58 +1909,126 @@ function controlsVisibleReport(){
   const c=window.__BC_CTRL;
   const pad=2;
   const fully=(b)=>b.visible && b.y>=pad && (b.y+b.h)<=c.H-pad && b.x>=pad && (b.x+b.w)<=c.W-pad;
-    const portraitOk = c.orientation!=='portrait' || (c.nose.fracY>=0.68 && c.nose.fracY<=0.80);
+  const raisedOk = c.trick.bottomClear >= 40;
+  const portraitOk = c.orientation!=='portrait' || (c.trick.fracY>=0.55 && c.trick.fracY<=0.88);
   return {
     orientation:c.orientation, W:c.W, H:c.H,
-    nose:c.nose, throt:c.throt,
-    noseOk:fully(c.nose), throtOk:fully(c.throt),
-    raisedOk:portraitOk,
-    ok:fully(c.nose)&&fully(c.throt)&&(c.orientation!=='portrait'||portraitOk)
+    trick:c.trick, throttleZone:c.throttleZone,
+    trickOk:fully(c.trick), raisedOk, portraitOk,
+    ok:fully(c.trick)&&raisedOk&&(c.orientation!=='portrait'||portraitOk)
   };
 }
 
 async function runAutoTest(){
-  const report={ok:false, steps:[], controls:{portrait:null, landscape:null}, visual:null, terrainAir:[]};
+  const report={ok:false, steps:[], controls:{portrait:null, landscape:null}, visual:null, terrainAir:[], fail:[]};
   function wait(ms){return new Promise(r=>setTimeout(r,ms));}
+  function pass(name, cond, detail){
+    report.steps.push({name, ok:!!cond, detail});
+    if(!cond) report.fail.push(name);
+  }
   report.controls.portrait=controlsVisibleReport();
 
-  reset();
-  S._auto=true;
-  const lips=LIPS.map(L=>L[0]);
-  let lipI=0;
+  reset(); S._auto=true;
+  for(const b of S.boulders) b.hit=true;
+  input.throtPointers.clear(); input._keyThrottle=true; syncThrottle();
+  input.trick=false;
+  const x0=S.p.x;
   let guard=0;
-  while(!S.finished && guard++<6000){
-    input.throttle=true; throtEl.classList.add('on');
-    for(const b of S.boulders) b.hit=true;
+  while(guard++<180){ step(0.016); }
+  pass('throttle_climb', S.p.x > x0+80 && S.p.vx>160 && !input.trick, {x:S.p.x, dx:S.p.x-x0, vx:S.p.vx, on:S.p.on});
 
-    if(lipI<lips.length && S.p.x >= lips[lipI]-40){
-      const lx=lips[lipI];
-      S.p.x=lx; S.p.on=false; S.p.y=groundY(lx)-100; S.p.vy=-80; S.p.vx=280;
-      S.airTime=0.2; S.p.ang=slopeAt(lx)-0.15;
-      if(lipI%2===0) airTapTrick(); else startHoldFlip();
-      if(S.p.trick && S.p.spinTarget){ S.p.spinAcc=S.p.spinTarget; S.p.ang=slopeAt(lx); }
+  reset(); S._auto=true; S.p.vx=200;
+  doGroundPop();
+  pass('tap_pop', !S.p.on && S.p.vy<0, {on:S.p.on, vy:S.p.vy});
+
+  reset(); S._auto=true;
+  S.p.x=340; S.p.on=false; S.p.y=groundY(340)-50; S.p.vy=-40; S.p.vx=220;
+  S.airTime=0.15; S.launchAmp=34; S.bigAirLatch=false; resetMeter();
+  doAirTapTrick();
+  pass('small_no_meter', !S.meter.active, {meter:S.meter});
+  for(let i=0;i<90 && !S.p.on;i++) step(0.016);
+  pass('tap_trick_clean', S.p.on && S.tricksLanded>=1 && !S.crashed, {
+    on:S.p.on, tricks:S.tricksLanded, crashed:S.crashed, score:S.score
+  });
+
+  reset(); S._auto=true;
+  const bigLip=LIPS.find(L=>L[2]>=BIG_AIR_AMP);
+  S.p.x=bigLip[0]+bigLip[1]*0.55;
+  S.p.on=false; S.p.y=groundY(S.p.x)-110; S.p.vy=-60; S.p.vx=260;
+  S.airTime=0.5; S.launchAmp=bigLip[2]; S.bigAirLatch=true;
+  input.trick=true; input.trickDownAt=performance.now()-300; input.trickWasHold=true;
+  beginAirTrickHold();
+  S.meter.level=0.75; // inside gold/green (zones retuned)
+  releaseMeter(400, true);
+  input.trick=false; trickEl.classList.remove('on'); // finger up
+  pass('green_release_commit', S.meter.committed && (S.meter.stick==='clean'||S.meter.stick==='perfect'), {meter:Object.assign({},S.meter)});
+  for(let i=0;i<100 && !S.p.on;i++) step(0.016);
+  pass('green_lands', S.p.on && S.tricksLanded>=1 && !S.crashed, {
+    tricks:S.tricksLanded, crashed:S.crashed, score:S.score
+  });
+
+  reset(); S._auto=true;
+  S.p.x=bigLip[0]+bigLip[1]*0.5;
+  S.p.on=false; S.p.y=groundY(S.p.x)-100; S.p.vy=-40; S.p.vx=240;
+  S.airTime=0.5; S.launchAmp=bigLip[2]; S.bigAirLatch=true;
+  draw();
+  report.terrainAir.push(terrainOnScreenCheck());
+
+  reset(); S._auto=true;
+  S.p.x=bigLip[0]+bigLip[1]*0.55;
+  S.p.on=false; S.p.y=groundY(S.p.x)-110; S.p.vy=-60; S.p.vx=260;
+  S.airTime=0.5; S.launchAmp=bigLip[2]; S.bigAirLatch=true;
+  input.trick=true; input.trickDownAt=performance.now()-500; input.trickWasHold=true;
+  beginAirTrickHold();
+  S.meter.level=0.96; // past green
+  releaseMeter(600, true);
+  input.trick=false; trickEl.classList.remove('on');
+  for(let i=0;i<100 && !S.p.on;i++) step(0.016);
+  pass('late_release_crash', S.crashed===true || S.p.lives<4, {
+    crashed:S.crashed, lives:S.p.lives, stick:S.meter&&S.meter.stick
+  });
+
+  reset(); S._auto=true;
+  S.p.x=340; S.p.on=false; S.p.y=groundY(340)-40; S.p.vy=-20; S.p.vx=180;
+  S.airTime=0.12; S.launchAmp=34; S.bigAirLatch=false; resetMeter();
+  input.trick=true; input.trickDownAt=performance.now()-250; input.trickWasHold=true;
+  beginAirTrickHold();
+  pass('meter_never_small', !S.meter.active, {meter:Object.assign({},S.meter), big:isBigAirEligible()});
+
+  reset(); S._auto=true;
+  for(const b of S.boulders) b.hit=true;
+  input._keyThrottle=true; syncThrottle();
+  guard=0; let lipI=0;
+  const lips=LIPS.map(L=>({x:L[0], amp:L[2]}));
+  while(!S.finished && guard++<5000){
+    if(lipI<lips.length && S.p.x >= lips[lipI].x-30){
+      const L=lips[lipI];
+      S.p.x=L.x+40; S.p.on=false; S.p.y=groundY(S.p.x)-(L.amp>=BIG_AIR_AMP?110:55);
+      S.p.vy=-50; S.p.vx=280; S.airTime=L.amp>=BIG_AIR_AMP?0.5:0.15;
+      S.launchAmp=L.amp; S.bigAirLatch=L.amp>=BIG_AIR_AMP; resetMeter();
+      if(L.amp>=BIG_AIR_AMP){
+        input.trick=true; beginAirTrickHold();
+        S.meter.level=0.73; releaseMeter(350,true);
+      } else {
+        doAirTapTrick();
+      }
       draw();
-      report.terrainAir.push(terrainOnScreenCheck());
-      await wait(80);
-      S.p.y=groundY(S.p.x); S.p.vy=0; S.p.on=true; S.airTime=0.5;
-      if(S.p.trick){
-        const pts=Math.round(S.p.trick.pts * S.combo);
-        S.score+=pts; S.tricksLanded++; S.jumpsLanded++; S.comboChain++;
-        S.combo=Math.min(4,1+S.comboChain*0.35);
-        toast(S.p.trick.lab+' +'+pts); S.p.trick=null; S.p.spinAcc=0; S.p.spinTarget=0;
-      } else S.jumpsLanded++;
-      S.p.ang=slopeAt(S.p.x); lipI++;
-      await wait(40);
+      if(L.amp>=BIG_AIR_AMP) report.terrainAir.push(terrainOnScreenCheck());
+      await wait(30);
+      S.p.y=groundY(S.p.x)+1; S.p.vy=40; step(0.016);
+      lipI++;
+      await wait(20);
     }
     if(S.p.vx<120) S.p.vx=280;
     if(lipI>=lips.length){
       S.p.on=true; S.p.vx=Math.max(S.p.vx, 360);
-      S.p.x += 28;
-      S.p.y=groundY(S.p.x); S.p.ang=slopeAt(S.p.x);
+      S.p.x += 28; S.p.y=groundY(S.p.x); S.p.ang=slopeAt(S.p.x);
     }
     if(S.p.x > LEVEL_LEN-80){ S.p.x=LEVEL_LEN+1; }
-    await wait(16);
+    step(0.016);
+    await wait(8);
   }
+
   report.controls.portrait = report.controls.portrait || controlsVisibleReport();
   if(window.__BC_CTRL_LANDSCAPE) report.controls.landscape=window.__BC_CTRL_LANDSCAPE;
   else report.controls.landscape=controlsVisibleReport();
@@ -896,21 +2037,42 @@ async function runAutoTest(){
   report.visual=visualClearCheck();
   report.terrainAirOk = report.terrainAir.length>0 && report.terrainAir.every(t=>t.ok);
 
-  // Fail-test: pines must be fixed world-x, never sled-welded, never on kickers
   const pineSnap = (S.pines||[]).map(pn=>({x:pn.x, onFeature:onFeatureSpan(pn.x)}));
   const pineFollowFail = pineSnap.some(pn=>Math.abs(pn.x - (S.p.x+160))<1);
   const pineFeatureFail = pineSnap.some(pn=>pn.onFeature);
   const pineWorldOk = pineSnap.length>0 && !pineFollowFail && !pineFeatureFail;
-  // Stability: world x unchanged across the climb
   const pineStart = window.__BC_PINES || [];
   const pineStable = pineStart.length===pineSnap.length &&
     pineStart.every((pn,i)=>Math.abs(pn.x - pineSnap[i].x)<0.01);
   report.pines={ok:pineWorldOk&&pineStable, followFail:pineFollowFail, featureFail:pineFeatureFail,
     stable:pineStable, list:pineSnap};
 
+  report.cardHud = {portrait:null, landscape:null};
+  function freezeCrashCardCheck(testW, testH){
+    W=testW; H=testH;
+    cv.width=(W*DPR)|0; cv.height=(H*DPR)|0;
+    cx.setTransform(DPR,0,0,DPR,0,0);
+    camSmoothY=null; scorePops=[];
+    reset(); S._auto=true;
+    applyCrashPose(S.p);
+    midFlash('UNDER-ROTATED', null, false);
+    computeCam(S.p); draw();
+    return assertCardClearsHud();
+  }
+  const savedW=W, savedH=H;
+  report.cardHud.portrait = freezeCrashCardCheck(390, 844);
+  pass('card_clears_hud_portrait', report.cardHud.portrait.ok, report.cardHud.portrait);
+  report.cardHud.landscape = freezeCrashCardCheck(844, 390);
+  pass('card_clears_hud_landscape', report.cardHud.landscape.ok, report.cardHud.landscape);
+  W=savedW; H=savedH; resize();
+
+  const failOk = report.fail.length===0;
   const cOk = report.controls.portrait.ok && (report.controls.landscape?report.controls.landscape.ok:true);
-  report.ok = !!(S.won && S.jumpsLanded>=3 && S.tricksLanded>=2 && cOk && report.visual.ok
-    && report.terrainAirOk && report.pines.ok);
+  const cardOk = report.cardHud.portrait.ok && report.cardHud.landscape.ok;
+  const bigLips = LIPS.filter(L=>L[2]>=BIG_AIR_AMP).length;
+  report.bigLips=bigLips;
+  report.ok = !!(failOk && S.won && S.jumpsLanded>=3 && S.tricksLanded>=2 && cOk && report.visual.ok
+    && report.terrainAirOk && report.pines.ok && bigLips>=3 && cardOk);
   report.jumpsLanded=S.jumpsLanded; report.tricksLanded=S.tricksLanded;
   report.score=S.score; report.won=S.won; report.height=S.height;
   report.CAM_ROT=CAM_ROT; report.HUMAN_H_FRAC=HUMAN_H_FRAC;
@@ -919,37 +2081,142 @@ async function runAutoTest(){
   return report;
 }
 window.__BC_controlsVisibleReport=controlsVisibleReport;
+window.__BC_assertCardClearsHud=assertCardClearsHud;
 
 function applyShotFreeze(){
   if(!SHOT||!S) return;
   camSmoothY=null;
-  if(SHOT==='air' || SHOT==='airland'){
-    // Mid-lip airtime — high enough to read as a jump, low enough that ground stays framed
-    S.p.on=false; S.p.x=760; S.p.y=groundY(760)-78; S.p.vy=-140; S.p.ang=-0.5;
-    S.p.trick=TRICKS[4]; S.p.spinAcc=-Math.PI; S.airTime=0.5;
-    S.score=420; S.p.charge=0.72; BG.key='alpenglow';
-    S.lean=-0.18; S.tuck=0.14; S.bob=0; S.compress=0;
-    toast('BACKFLIP');
-  } else if(SHOT==='land'){
-    S.p.on=true; S.p.x=820; S.p.y=groundY(820); S.p.ang=slopeAt(820); S.landFlash=0.3;
-    S.jumpsLanded=2; S.tricksLanded=1; S.score=280; S.p.charge=0.68;
-    S.lean=0.06; S.compress=0.85; S.tuck=0; S.bob=0;
-    toast('HEEL CLICKER +140'); BG.key='storm';
-  } else if(SHOT==='controls'){
-    S.p.x=500; S.p.y=groundY(500); S.p.charge=0.85; BG.key=FORCE_BG||'storm';
-    S.lean=-0.1; S.bob=1.2;
+  scorePops=[];
+  const bigLip=LIPS.find(L=>L[2]>=BIG_AIR_AMP) || LIPS[1];
+  const hideHints=()=>{
+    if(throtHintEl) throtHintEl.classList.add('hide');
+  };
+  BG.key = resolveBgKey();
+  if(SHOT==='climb' || SHOT==='controls'){
+    // Seat sled just uphill of the first rock so a boulder reads near the skis
+    S.p.on=true; S.p.x=360; S.p.y=groundY(360); S.p.ang=slopeAt(360);
+    S.p.vx=220; S.p.charge=0.85;
+    S.lean=-0.12; S.bob=1.4; S.throtGlow=0; // no stray green edge on plate QA shots
+    input._keyThrottle=false; syncThrottle();
+    S.throtHeld=3.1; tipsAfterFirstRun=false;
+    hideHints();
+  } else if(SHOT==='pop'){
+    hideHints();
+    S.p.on=false; S.p.x=380; S.p.y=groundY(380)-56; S.p.vy=-200; S.p.ang=slopeAt(380)-0.25;
+    S.airTime=0.12; S.launchAmp=34; S.bigAirLatch=false; resetMeter();
+    S.lean=-0.08; S.tuck=0.06; midFlash('POP', null, false);
+  } else if(SHOT==='meter' || SHOT==='air' || SHOT==='airland'){
+    hideHints();
+    S.throtHeld=3.1;
+    S.p.on=false; S.p.x=bigLip[0]+bigLip[1]*0.5;
+    S.p.y=groundY(S.p.x)-118; S.p.vy=-120; S.p.ang=-0.55;
+    S.airTime=0.55; S.launchAmp=bigLip[2]; S.bigAirLatch=true;
+    S.p.trick=TRICKS[4]; S.p.spinAcc=-Math.PI; S.chainCount=2; S.chainLabs=['BACKFLIP','BARREL ROLL'];
+    S.meter={active:true, level:0.58, holding:true, committed:false, stick:null, crash:false};
+    S.score=420; S.p.charge=0.72;
+    S.lean=-0.18; S.tuck=0.14;
+  } else if(SHOT==='green'){
+    hideHints();
+    S.p.on=false; S.p.x=bigLip[0]+bigLip[1]*0.55;
+    S.p.y=groundY(S.p.x)-100; S.p.vy=-40; S.p.ang=-0.2;
+    S.airTime=0.7; S.launchAmp=bigLip[2]; S.bigAirLatch=true;
+    S.p.trick=TRICKS[4]; S.chainLabs=['BACKFLIP']; S.chainCount=1;
+    S.meter={active:true, level:0.75, holding:false, committed:true, stick:'perfect', crash:false};
+    S.score=640; S.tuck=0.12;
+  } else if(SHOT==='landed' || SHOT==='land'){
+    hideHints();
+    S.p.on=true; S.p.x=bigLip[0]+bigLip[1]+40; S.p.y=groundY(S.p.x); S.p.ang=slopeAt(S.p.x);
+    S.landFlash=0.35; S.compress=0.9; S.jumpsLanded=3; S.tricksLanded=2; S.score=860;
+    S.p.charge=0.68; S.lean=0.06; resetMeter();
+    scorePopup('BACKFLIP', 416, true);
+  } else if(SHOT==='crash'){
+    hideHints();
+    let cxCrash=bigLip[0]+bigLip[1]+120;
+    const blocked=(x)=>
+      (S.pines||[]).some(pn=>Math.abs(pn.x-x)<90) ||
+      (S.boulders||[]).some(b=>!b.hit && Math.abs(b.x-x)<55);
+    let best=cxCrash, bestScore=1e9;
+    for(let k=0;k<16;k++){
+      const x=cxCrash + k*36;
+      if(blocked(x)) continue;
+      const sc=Math.abs(slopeAt(x));
+      if(sc<bestScore){ bestScore=sc; best=x; }
+      if(sc<0.25) break;
+    }
+    S.p.x=best; S.p.vx=60; S.p.lives=3; S.landFlash=0.18;
+    applyCrashPose(S.p);
+    resetMeter();
+    midFlash('UNDER-ROTATED', null, false);
   } else if(SHOT==='pine'){
-    // Plant sled so a fixed world pine is clearly on-screen (not glued to sled)
+    hideHints();
     S.p.x=400; S.p.y=groundY(400); S.p.ang=slopeAt(400); S.p.charge=0.9;
-    BG.key=FORCE_BG||'storm';
+  } else if(SHOT==='rocks'){
+    hideHints();
+    S.pines = [];
+    const rA=32, rC=28, pairGap=120;
+    let bestX=null, bestScore=1e9;
+    for(let x=300;x<Math.min(LEVEL_LEN-220, 2100);x+=6){
+      const a=x, c=x+pairGap, m=x+pairGap*0.5;
+      if(rockSpansCrest(a, rA) || rockSpansCrest(c, rC) || rockSpansCrest(m, 20)) continue;
+      const s1=slopeAt(a), s2=slopeAt(c), sm=slopeAt(m);
+      if(s1*s2<=0 || s1*sm<=0) continue;
+      const curv = terrainCurv(m, 22) + terrainCurv(a, 18) + terrainCurv(c, 18);
+      if(curv > 1.0) continue; // crest-ish
+      const absS=Math.min(Math.abs(s1), Math.abs(s2), Math.abs(sm));
+      if(absS<0.10 || absS>0.55) continue;
+      const score = Math.abs(absS-0.22)*4 + Math.max(0, curv)*6 + (curv<-1?-5:0);
+      if(score<bestScore){ bestScore=score; bestX=x; }
+    }
+    if(bestX==null){
+      bestX = seatOnSlope(900);
+      if(rockSpansCrest(bestX, rA)) bestX = seatOnSlope(bestX+60);
+    }
+    const aX=bestX;
+    let cSafe=aX+pairGap;
+    for(let dx=0; dx<160; dx+=4){
+      const cx0=aX+pairGap+dx;
+      if(!rockSpansCrest(cx0, rC) && terrainCurv(cx0,18)<=1.2){ cSafe=cx0; break; }
+    }
+    S.boulders = [
+      {x:aX, r:rA, bury:0.45, hit:false, seed:11},
+      {x:cSafe, r:rC, bury:0.44, hit:false, seed:29}
+    ];
+    const mid=(aX+cSafe)/2;
+    // Sled near first rock for landscape QA
+    S.p.x=aX - 90; S.p.y=groundY(S.p.x); S.p.ang=slopeAt(S.p.x);
+    S.p.vx=30; S.p.charge=0.7; S.lean=0; S.bob=0; S.throtGlow=0;
+    window.__BC_ROCKS_SHOT={
+      a:aX, c:cSafe, mid, slope:slopeAt(mid), sA:slopeAt(aX), sB:slopeAt(cSafe),
+      curvA:terrainCurv(aX,18), curvC:terrainCurv(cSafe,18),
+      spansCrest: rockSpansCrest(aX,rA)||rockSpansCrest(cSafe,rC),
+      gap:cSafe-aX
+    };
+  }
+  // Precompute sled px so rockDims is absolute even before blitSled runs
+  if(ART.world && ART.world.frames.sled){
+    const sf=ART.world.frames.sled, sc=artScale();
+    window.__BC_SLED_PX={w:(sf.w/2)*sc, h:(sf.h/2)*sc, landscape:W>H, artScale:sc};
   }
   syncHud();
   computeCam(S.p);
+  if(SHOT==='rocks' && window.__BC_ROCKS_SHOT){
+    const mid=window.__BC_ROCKS_SHOT.mid;
+    const camX=mid - W*0.50;
+    const gy=groundY(mid);
+    const camY=gy - H*0.55;
+    camSmoothY=camY;
+    lastCam={x:camX, y:camY, groundScreenY:gy-camY, sledScreenY:S.p.y-camY};
+  }
   window.__BC_GAME={
     running:false, x:S.p.x, on:S.p.on, ang:S.p.ang, height:S.height, score:S.score,
     jumpsLanded:S.jumpsLanded, tricksLanded:S.tricksLanded, lives:S.p.lives,
-    airTime:S.airTime, finished:false, CAM_ROT, shot:SHOT,
+    airTime:S.airTime, meter:S.meter, finished:false, CAM_ROT, shot:SHOT, bg:BG.key, levelIdx,
     groundScreenY:lastCam.groundScreenY, sledScreenY:lastCam.sledScreenY
+  };
+  window.__BC_BG={
+    key:BG.key, treat:BG.treat||BG_TREAT, levelIdx,
+    rotation:BG_ROTATION.slice(), loaded:[], platesDropped:true,
+    settings:Object.keys(SETTINGS)
   };
 }
 
@@ -958,7 +2225,6 @@ Promise.all([initArt()]).then(async ()=>{
   if(SHOT) applyShotFreeze();
   last=performance.now();
   raf=requestAnimationFrame(loop);
-  // Let a frame paint before marking ready (backdrop sample + first draw)
   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   if(AUTO) await runAutoTest();
   window.__BC_READY=true;
