@@ -1,0 +1,36 @@
+{
+ "image": "world-atlas@2x.webp",
+ "scale": "2x DPR cropped TP-only frames",
+ "frames": {
+  "pine_tall": {
+   "x": 2,
+   "y": 0,
+   "w": 202,
+   "h": 375
+  },
+  "pine_small": {
+   "x": 206,
+   "y": 105,
+   "w": 134,
+   "h": 270
+  },
+  "patrol": {
+   "x": 2,
+   "y": 377,
+   "w": 123,
+   "h": 190
+  },
+  "skier": {
+   "x": 127,
+   "y": 377,
+   "w": 111,
+   "h": 190
+  },
+  "kicker": {
+   "x": 240,
+   "y": 377,
+   "w": 215,
+   "h": 135
+  }
+ }
+}

@@ -1,0 +1,18 @@
+{
+ "image": "grom-atlas@2x.webp",
+ "scale": "2x DPR, same ruler as rider-atlas (adult ride 170px = 85 CSS px; grom_ride ~120px = 60 CSS px, ~70% of adult)",
+ "frames": {
+  "grom_ride": {
+   "x": 0,
+   "y": 0,
+   "w": 91,
+   "h": 120
+  },
+  "grom_sit": {
+   "x": 95,
+   "y": 40,
+   "w": 96,
+   "h": 80
+  }
+ }
+}

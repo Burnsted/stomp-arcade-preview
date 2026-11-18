@@ -1,0 +1,20 @@
+{
+  "image": "kicker@2x.webp",
+  "scale": "2x",
+  "frames": {
+    "kicker": {
+      "x": 0,
+      "y": 0,
+      "w": 424,
+      "h": 135
+    }
+  },
+  "notes": {
+    "what": "Complete packed-snow terrain-park jump: approach + crisp lip + landing as ONE landform. Cool blue-white, corduroy, no plastic, no wood, no orange trim, no visible underside.",
+    "seat": "Seat the sprite bottom on the BASE slope (snowY / un-featured terrain), slightly buried (about 6\u201310 CSS px). This sprite IS the visible jump.",
+    "do_not": "Do not seat on featured terrain (gY). Do not also draw the old white wedge kicker. Do not also draw a second snow mound (skip drawTerrFeature mound fill and highlight under this sprite; lip spray is fine).",
+    "physics": "Keep existing featH / amp. If height stays 135 at 2x, amp stays 67.5. Do not auto-scale amp from the new width (424 vs old 215).",
+    "facing": "Right (downhill). No flip.",
+    "scope": "Terrain Park only. Do not change Backcountry Climb's world-atlas kicker unless asked."
+  }
+}
