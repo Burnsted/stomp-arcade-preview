@@ -1,5 +1,5 @@
-/* terrain-park-next-62f9f2f — network-first; sha-named tip cache (leave tp-release-* alone) */
-const C="terrain-park-next-62f9f2f";
+/* terrain-park-next-120310a — network-first; sha-named tip cache (leave tp-release-* alone) */
+const C="terrain-park-next-120310a";
 const ASSETS=['./','./index.html','./sw.js'];
 const OWN=k=>k.indexOf('terrain-park-next-')===0;
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
