@@ -1,5 +1,5 @@
-/* Haven's Garden ed2fa96 — cache bust + skipWaiting/clients.claim */
-const CACHE = 'havens-garden-ed2fa96';
+/* Haven's Garden 1bbb40a — cache bust + skipWaiting/clients.claim */
+const CACHE = 'havens-garden-1bbb40a';
 const PRECACHE = [
   './',
   './index.html',

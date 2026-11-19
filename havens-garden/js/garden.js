@@ -1,5 +1,5 @@
 /* Haven's Garden — Grok Build port improved to Ted's spec
- * Version: v0.1.9-grokbuild-improved
+ * Version: v0.1.12-grokbuild-improved
  * Standalone canvas engine (no login / app wrapper).
  * Art: Franz-style picture-book assets in ../art/
  * No copied IP, no real photos.
@@ -7,7 +7,7 @@
 (function (global) {
   'use strict';
 
-  const VER = 'v0.1.9-grokbuild-improved';
+  const VER = 'v0.1.12-grokbuild-improved';
   const KEY = 'havensGarden.grokbuild.improved.v1';
   const BASKET_MAX = 8;
   const WIN_FLOWERS = 20;
@@ -46,7 +46,8 @@
     L: { w: 84, growSec: 120, yieldN: 2, label: 'large' }, // ~1/4.6 (< 1/4)
   };
   // Stair-step plant stand: top / mid / bot shelf seating Y (world px).
-  const GH_SHELF = { top: 280, mid: 430, bot: 600, plank: 20 };
+  // Dropped so top pot badges clear the supplies/toast HUD at 390×844
+  const GH_SHELF = { top: 348, mid: 498, bot: 658, plank: 20 };
   // 13 slots seated on each plank (centers inset by half pot width).
   const GH_SLOTS = [
     // TOP — 6 small on narrow upper plank
@@ -69,6 +70,22 @@
   const POTS = GH_SLOTS;
   const GH_MIN_HIT = 52; // finger-sized hit even when art is smaller
   const GH_STAGE = { seed: 0.5, sprout: 1.35, bud: 2.35, bloom: 2.95 };
+  // Toddler-clear resource gates (icons drawn on pots/rows).
+  // Wire to real activities when present; stub icons stay visible either way.
+  const GH_GATE = {
+    // After water, medium/large need a resource before growth runs.
+    grow: {
+      S: null, // small grows after water (seed already spent a flower)
+      M: { kind: 'honey', n: 1, icon: 'honey', label: 'honey' },
+      L: { kind: 'bug', n: 1, icon: 'bug', label: 'bugs' },
+    },
+    // Bloomed pots cascade down only when the next-tier gate is paid.
+    cascade: {
+      S: { kind: 'honey', n: 1, icon: 'honey', label: 'honey' },
+      M: { kind: 'bug', n: 2, icon: 'bug', label: 'bugs' },
+    },
+  };
+  const BOUQUET_SELL_PRICE = 5;
   const NET_RADIUS_BASE = 108;
   const NET_RADIUS_BIG = 160;
   const DRESS_CATALOG = [
@@ -119,6 +136,9 @@
       plantedAt: null,
       wateredAt: null,
       updatedAt: null,
+      fueled: false, // paid grow-gate (M/L)
+      group: 0, // combined same-color count (medium)
+      bouquet: null, // array of flower kinds (large bouquet pot)
     };
   }
 
@@ -130,14 +150,21 @@
     const b = raw && typeof raw === 'object' ? raw : {};
     const flower = FLOWERS.includes(b.flower) ? b.flower : null;
     const sz = b.size === 'S' || b.size === 'M' || b.size === 'L' ? b.size : size || 'M';
+    const bouquet = Array.isArray(b.bouquet)
+      ? b.bouquet.filter((f) => FLOWERS.includes(f)).slice(0, 8)
+      : null;
+    const hasPlant = !!flower || (bouquet && bouquet.length);
     return {
-      flower,
-      wet: !!b.wet && !!flower,
-      stage: flower ? Math.max(0, Math.min(3, Number(b.stage) || 0)) : 0,
+      flower: flower || (bouquet && bouquet[0]) || null,
+      wet: !!b.wet && hasPlant,
+      stage: hasPlant ? Math.max(0, Math.min(3, Number(b.stage) || 0)) : 0,
       size: sz,
-      plantedAt: flower && b.plantedAt != null ? Number(b.plantedAt) || null : null,
-      wateredAt: flower && b.wet && b.wateredAt != null ? Number(b.wateredAt) || null : null,
+      plantedAt: hasPlant && b.plantedAt != null ? Number(b.plantedAt) || null : null,
+      wateredAt: hasPlant && b.wet && b.wateredAt != null ? Number(b.wateredAt) || null : null,
       updatedAt: b.updatedAt != null ? Number(b.updatedAt) || null : null,
+      fueled: !!b.fueled && hasPlant,
+      group: hasPlant ? Math.max(1, Math.min(8, Number(b.group) || (bouquet ? bouquet.length : 1))) : 0,
+      bouquet: bouquet && bouquet.length ? bouquet : null,
     };
   }
 
@@ -196,7 +223,13 @@
       bigNet: false,
       rewardsClaimed: {},
       stickers: [],
-      stats: { sales: 0, jarsSold: 0, flowersSold: 0, coinsEarned: 0 },
+      stats: { sales: 0, jarsSold: 0, flowersSold: 0, coinsEarned: 0, bouquetsSold: 0 },
+      // Spendable greenhouse supplies brought back from other activities
+      ghSupply: { honey: 0, bugs: 0, flowers: 0 },
+      // Finished bottom-tier bouquet pots waiting to sell at Market
+      marketBouquets: [],
+      // In-flight cascade payloads (survive reload mid-hop)
+      pendingCascades: [],
     };
   }
 
@@ -232,7 +265,28 @@
         : ['classic'];
       if (owned.indexOf('classic') < 0) owned.unshift('classic');
       const dress = DRESS_CATALOG.some((c) => c.id === o.dress) ? o.dress : 'classic';
-      const stats = Object.assign({ sales: 0, jarsSold: 0, flowersSold: 0, coinsEarned: 0 }, o.stats || {});
+      const stats = Object.assign(
+        { sales: 0, jarsSold: 0, flowersSold: 0, coinsEarned: 0, bouquetsSold: 0 },
+        o.stats || {}
+      );
+      stats.bouquetsSold = Number(stats.bouquetsSold) || 0;
+      const gs = o.ghSupply && typeof o.ghSupply === 'object' ? o.ghSupply : {};
+      const ghSupply = {
+        honey: Math.max(0, Number(gs.honey) || 0),
+        bugs: Math.max(0, Number(gs.bugs) || 0),
+        flowers: Math.max(0, Number(gs.flowers) || 0),
+      };
+      const marketBouquets = Array.isArray(o.marketBouquets)
+        ? o.marketBouquets
+            .map((b) => {
+              const kinds = Array.isArray(b && b.kinds)
+                ? b.kinds.filter((f) => FLOWERS.includes(f)).slice(0, 8)
+                : [];
+              return kinds.length ? { kinds, id: String((b && b.id) || Math.random().toString(36).slice(2, 9)) } : null;
+            })
+            .filter(Boolean)
+            .slice(0, 12)
+        : [];
       return {
         ...base,
         ...o,
@@ -258,6 +312,13 @@
         rewardsClaimed: o.rewardsClaimed && typeof o.rewardsClaimed === 'object' ? o.rewardsClaimed : {},
         stickers: Array.isArray(o.stickers) ? o.stickers.slice(0, 40) : [],
         stats,
+        ghSupply,
+        marketBouquets,
+        pendingCascades: Array.isArray(o.pendingCascades)
+          ? o.pendingCascades
+              .filter((p) => p && p.payload && Number.isFinite(p.toIx))
+              .slice(0, 6)
+          : [],
       };
     } catch (e) {
       return base;
@@ -270,7 +331,7 @@
       img.decoding = 'async';
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error(src));
-      img.src = src + '?v=0.1.7j-gbi';
+      img.src = src + '?v=0.1.12-gbi';
     });
   }
 
@@ -385,6 +446,10 @@
 
 
     const parts = [];
+    let cascadeAnims = []; // juicy pot hops between tiers
+    let cascadeLock = false; // block double-cascade while anim plays
+    let potBadgeRects = []; // screen-space pot badges / ↓ tags (for HUD collision tests)
+    let ghHudRects = []; // screen-space greenhouse HUD chrome
     let pressed = null;
     let time = 0;
     let last = performance.now();
@@ -550,16 +615,418 @@
       return base * (save.fast ? 2.4 : 1);
     }
 
+    function bedHasPlant(bed) {
+      return !!(bed && (bed.flower || (bed.bouquet && bed.bouquet.length)));
+    }
+
+    function supplyOf(kind) {
+      if (!save.ghSupply) save.ghSupply = { honey: 0, bugs: 0, flowers: 0 };
+      if (kind === 'honey') return save.ghSupply.honey | 0;
+      if (kind === 'bug' || kind === 'bugs') return save.ghSupply.bugs | 0;
+      if (kind === 'flower' || kind === 'flowers') {
+        return (save.ghSupply.flowers | 0) + save.basket.length + save.bouquet.length;
+      }
+      return 0;
+    }
+
+    function creditSupply(kind, n) {
+      if (!save.ghSupply) save.ghSupply = { honey: 0, bugs: 0, flowers: 0 };
+      n = Math.max(0, n | 0);
+      if (kind === 'honey') save.ghSupply.honey = (save.ghSupply.honey | 0) + n;
+      else if (kind === 'bug' || kind === 'bugs') save.ghSupply.bugs = (save.ghSupply.bugs | 0) + n;
+      else if (kind === 'flower' || kind === 'flowers') save.ghSupply.flowers = (save.ghSupply.flowers | 0) + n;
+    }
+
+    function payGate(gate) {
+      if (!gate) return true;
+      if (!save.ghSupply) save.ghSupply = { honey: 0, bugs: 0, flowers: 0 };
+      const n = Math.max(1, gate.n | 0);
+      if (gate.kind === 'honey') {
+        if ((save.ghSupply.honey | 0) >= n) {
+          save.ghSupply.honey -= n;
+          return true;
+        }
+        // Wire to existing hive shelf jars when bank is empty (activity already built)
+        if ((save.hiveShelf | 0) >= n) {
+          save.hiveShelf -= n;
+          const fi = save.jarFull.lastIndexOf(true);
+          if (fi >= 0) save.jarFull[fi] = false;
+          save.jars = save.jarFull.filter(Boolean).length;
+          return true;
+        }
+        return false;
+      }
+      if (gate.kind === 'bug') {
+        if ((save.ghSupply.bugs | 0) >= n) {
+          save.ghSupply.bugs -= n;
+          return true;
+        }
+        // Wire to lifetime catch counter when bank is empty
+        if ((save.bugs | 0) >= n) {
+          save.bugs -= n;
+          return true;
+        }
+        return false;
+      }
+      if (gate.kind === 'flower') {
+        let left = n;
+        while (left > 0 && save.basket.length) {
+          save.basket.pop();
+          left--;
+        }
+        while (left > 0 && save.bouquet.length) {
+          save.bouquet.pop();
+          left--;
+        }
+        if (left > 0 && (save.ghSupply.flowers | 0) >= left) {
+          save.ghSupply.flowers -= left;
+          left = 0;
+        }
+        return left === 0;
+      }
+      return false;
+    }
+
+    function canAffordGate(gate) {
+      if (!gate) return true;
+      return supplyOf(gate.kind) >= Math.max(1, gate.n | 0) ||
+        (gate.kind === 'honey' && (save.hiveShelf | 0) >= (gate.n | 0)) ||
+        (gate.kind === 'bug' && (save.bugs | 0) >= (gate.n | 0));
+    }
+
+    function growGateFor(bed) {
+      if (!bed) return null;
+      return GH_GATE.grow[bed.size] || null;
+    }
+
+    function cascadeGateFor(bed) {
+      if (!bed) return null;
+      return GH_GATE.cascade[bed.size] || null;
+    }
+
+    function bedCanGrow(bed) {
+      if (!bedHasPlant(bed) || !bed.wet || bed.stage >= 3) return false;
+      const gate = growGateFor(bed);
+      if (!gate) return true; // small grows after water
+      return !!bed.fueled;
+    }
+
+    function clearBed(bed, size) {
+      const sz = size || (bed && bed.size) || 'M';
+      bed.flower = null;
+      bed.wet = false;
+      bed.stage = 0;
+      bed.size = sz;
+      bed.plantedAt = null;
+      bed.wateredAt = null;
+      bed.updatedAt = Date.now();
+      bed.fueled = false;
+      bed.group = 0;
+      bed.bouquet = null;
+    }
+
+    function harvestBloomToBouquet(i) {
+      // Legacy clip path — keeps existing Playwright tests green
+      const bed = save.beds[i];
+      if (!bed || !bedHasPlant(bed) || bed.stage < GH_STAGE.bloom) return false;
+      const kind = bed.flower || (bed.bouquet && bed.bouquet[0]);
+      if (!kind) return false;
+      const yieldN = (GH_TIER[bed.size] || GH_TIER.M).yieldN;
+      const p = potScreenPos(i);
+      clearBed(bed, GH_SLOTS[i].size);
+      for (let n = 0; n < yieldN; n++) save.bouquet.push(kind);
+      save.stars += yieldN;
+      job = null;
+      can = null;
+      girl.pose = 'pick';
+      girl.poseT = 0.4;
+      burst(p.x, p.y - 40, kind === 'sunflower' ? '#FFD15C' : PETAL);
+      chime('win');
+      say(yieldN > 1 ? 'Big clip! Plant them in the meadow' : 'Clipped! Plant it in the meadow');
+      persist();
+      return true;
+    }
+
+    function findCascadeTarget(fromIx) {
+      const from = save.beds[fromIx];
+      if (!from || !from.flower) return -1;
+      const size = from.size;
+      if (size === 'S') {
+        // Prefer same-color medium (group by color), else empty medium
+        let empty = -1;
+        for (let i = 0; i < save.beds.length; i++) {
+          if (GH_SLOTS[i].size !== 'M') continue;
+          const b = save.beds[i];
+          if (b.flower === from.flower && !b.bouquet) return i;
+          if (!bedHasPlant(b) && empty < 0) empty = i;
+        }
+        return empty;
+      }
+      if (size === 'M') {
+        for (let i = 0; i < save.beds.length; i++) {
+          if (GH_SLOTS[i].size === 'L' && !bedHasPlant(save.beds[i])) return i;
+        }
+      }
+      return -1;
+    }
+
+    function easeOutBack(t) {
+      const c1 = 1.70158;
+      const c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+
+    function spawnCascadeAnim(fromIx, toIx, payload) {
+      const a = potWorldBounds(fromIx);
+      const b = potWorldBounds(toIx);
+      const anim = {
+        fromIx,
+        toIx,
+        kind: payload.flower,
+        sizeFrom: a.size,
+        sizeTo: b.size,
+        x0: a.cx,
+        y0: a.footY,
+        x1: b.cx,
+        y1: b.footY,
+        t: 0,
+        max: 0.55,
+        spark: 0,
+        payload,
+        id: Math.random().toString(36).slice(2, 9),
+      };
+      cascadeAnims.push(anim);
+      cascadeLock = true;
+      if (!save.pendingCascades) save.pendingCascades = [];
+      save.pendingCascades.push({ id: anim.id, toIx, payload });
+      persist();
+      // Sparkle trail
+      for (let i = 0; i < 14; i++) {
+        parts.push({
+          x: a.cx + (Math.random() - 0.5) * 20,
+          y: a.footY - a.h * 0.5 + (Math.random() - 0.5) * 20,
+          vx: (Math.random() - 0.5) * 80,
+          vy: -40 - Math.random() * 80,
+          life: 0.45 + Math.random() * 0.25,
+          max: 0.7,
+          color: '#FFD15C',
+          s: 3 + Math.random() * 3,
+        });
+      }
+    }
+
+    function settlePendingCascades() {
+      // On boot / reload: apply any hops that were mid-flight so pots are never lost
+      if (!save.pendingCascades || !save.pendingCascades.length) return;
+      save.pendingCascades.forEach((p) => {
+        if (p && p.payload != null && p.toIx != null) applyCascadePayload(p.toIx | 0, p.payload);
+      });
+      save.pendingCascades = [];
+      persist();
+    }
+
+    function applyCascadePayload(toIx, payload) {
+      const bed = save.beds[toIx];
+      const now = Date.now();
+      if (payload.mode === 'group') {
+        if (bedHasPlant(bed) && bed.flower === payload.flower) {
+          bed.group = Math.min(8, (bed.group || 1) + (payload.group || 1));
+          bed.updatedAt = now;
+          // Keep stage; a new arrival doesn't reset growth
+        } else {
+          bed.flower = payload.flower;
+          bed.bouquet = null;
+          bed.wet = false;
+          bed.stage = 0.2;
+          bed.size = 'M';
+          bed.plantedAt = now;
+          bed.wateredAt = null;
+          bed.updatedAt = now;
+          bed.fueled = false;
+          bed.group = payload.group || 1;
+        }
+      } else if (payload.mode === 'bouquet') {
+        const kinds = (payload.kinds && payload.kinds.length)
+          ? payload.kinds.slice(0, 8)
+          : Array(Math.max(1, payload.group || 1)).fill(payload.flower);
+        bed.flower = kinds[0];
+        bed.bouquet = kinds;
+        bed.wet = false;
+        bed.stage = 0.2;
+        bed.size = 'L';
+        bed.plantedAt = now;
+        bed.wateredAt = null;
+        bed.updatedAt = now;
+        bed.fueled = false;
+        bed.group = kinds.length;
+      }
+    }
+
+    function finishCascadeAnim(anim) {
+      applyCascadePayload(anim.toIx, anim.payload);
+      if (save.pendingCascades && anim.id) {
+        save.pendingCascades = save.pendingCascades.filter((p) => p.id !== anim.id);
+      }
+      const b = potWorldBounds(anim.toIx);
+      for (let i = 0; i < 18; i++) {
+        parts.push({
+          x: b.cx + (Math.random() - 0.5) * 30,
+          y: b.footY - b.h * 0.6,
+          vx: (Math.random() - 0.5) * 120,
+          vy: -60 - Math.random() * 100,
+          life: 0.5 + Math.random() * 0.3,
+          max: 0.8,
+          color: i % 2 ? '#FFD15C' : PETAL,
+          s: 3 + Math.random() * 4,
+        });
+      }
+      chime('win');
+      persist();
+    }
+
+    function updateCascadeAnims(dt) {
+      if (!cascadeAnims.length) {
+        cascadeLock = false;
+        return;
+      }
+      for (let i = cascadeAnims.length - 1; i >= 0; i--) {
+        const a = cascadeAnims[i];
+        a.t += dt;
+        a.spark += dt;
+        if (a.spark > 0.05) {
+          a.spark = 0;
+          const k = Math.min(1, a.t / a.max);
+          const x = a.x0 + (a.x1 - a.x0) * k;
+          const y = a.y0 + (a.y1 - a.y0) * k - Math.sin(k * Math.PI) * 48;
+          parts.push({
+            x: x + (Math.random() - 0.5) * 12,
+            y: y - 20,
+            vx: (Math.random() - 0.5) * 40,
+            vy: -20 - Math.random() * 40,
+            life: 0.3,
+            max: 0.3,
+            color: '#FFF6A0',
+            s: 2 + Math.random() * 2,
+          });
+        }
+        if (a.t >= a.max) {
+          finishCascadeAnim(a);
+          cascadeAnims.splice(i, 1);
+        }
+      }
+      if (!cascadeAnims.length) cascadeLock = false;
+    }
+
+    function drawCascadeAnims() {
+      cascadeAnims.forEach((a) => {
+        const k = easeOutBack(Math.min(1, a.t / a.max));
+        const x = a.x0 + (a.x1 - a.x0) * Math.min(1, k);
+        const hop = Math.sin(Math.min(1, a.t / a.max) * Math.PI) * 56;
+        const y = a.y0 + (a.y1 - a.y0) * Math.min(1, a.t / a.max) - hop;
+        const sz = potDrawSize(a.sizeFrom);
+        drawIllustratedPot(x, y, sz.w, sz.h, a.sizeFrom);
+        if (a.kind) drawBloomHead(a.kind, x, y - sz.h * 0.2, Math.max(22, sz.h * 0.55));
+      });
+    }
+
+    function tryFuelBed(i) {
+      const bed = save.beds[i];
+      if (!bed || !bedHasPlant(bed) || !bed.wet || bed.fueled) return false;
+      const gate = growGateFor(bed);
+      if (!gate) {
+        bed.fueled = true;
+        return true;
+      }
+      if (!canAffordGate(gate)) {
+        say('Need ' + gate.n + ' ' + gate.label + '!');
+        return false;
+      }
+      if (!payGate(gate)) {
+        say('Need ' + gate.n + ' ' + gate.label + '!');
+        return false;
+      }
+      bed.fueled = true;
+      bed.updatedAt = Date.now();
+      say('Growing with ' + gate.label + '!');
+      chime('plant');
+      persist();
+      return true;
+    }
+
+    function tryCascade(i) {
+      if (cascadeLock) return false;
+      const bed = save.beds[i];
+      if (!bed || !bedHasPlant(bed) || bed.stage < GH_STAGE.bloom) return false;
+      if (bed.size === 'L') return tryHarvestBouquet(i);
+
+      const gate = cascadeGateFor(bed);
+      if (gate && !canAffordGate(gate)) {
+        say('Need ' + gate.n + ' ' + gate.label + ' to move down!');
+        return false;
+      }
+      const toIx = findCascadeTarget(i);
+      if (toIx < 0) {
+        say(bed.size === 'S' ? 'Middle pots are full!' : 'Big pots are full!');
+        return false;
+      }
+      if (gate && !payGate(gate)) {
+        say('Need ' + gate.n + ' ' + gate.label + ' to move down!');
+        return false;
+      }
+
+      let payload;
+      if (bed.size === 'S') {
+        payload = { mode: 'group', flower: bed.flower, group: 1 };
+        say('Down to the middle!');
+      } else {
+        const n = Math.max(1, bed.group || 1);
+        const kinds = [];
+        for (let k = 0; k < n; k++) kinds.push(bed.flower);
+        payload = { mode: 'bouquet', flower: bed.flower, kinds, group: n };
+        say('Bouquet pot!');
+      }
+      // Clear source immediately so rapid taps cannot duplicate
+      clearBed(bed, GH_SLOTS[i].size);
+      persist();
+      spawnCascadeAnim(i, toIx, payload);
+      girl.pose = 'pick';
+      girl.poseT = 0.35;
+      return true;
+    }
+
+    function tryHarvestBouquet(i) {
+      const bed = save.beds[i];
+      if (!bed || bed.size !== 'L' || bed.stage < GH_STAGE.bloom) return false;
+      if (!save.marketBouquets) save.marketBouquets = [];
+      if (save.marketBouquets.length >= 12) {
+        say('Market cart is full!');
+        return false;
+      }
+      const kinds = (bed.bouquet && bed.bouquet.length)
+        ? bed.bouquet.slice()
+        : Array(Math.max(1, bed.group || 1)).fill(bed.flower || 'daisy');
+      save.marketBouquets.push({ kinds, id: Math.random().toString(36).slice(2, 9) });
+      const p = potScreenPos(i);
+      clearBed(bed, 'L');
+      burst(p.x, p.y - 40, '#FFD15C');
+      girl.pose = 'pick';
+      girl.poseT = 0.4;
+      chime('win');
+      say('Bouquet ready — go to Market!');
+      persist();
+      return true;
+    }
+
     function catchUpGrowth() {
       const now = Date.now();
       let became = false;
       for (const bed of save.beds) {
-        if (!bed.flower || !bed.wet || bed.stage >= 3) {
+        if (!bedCanGrow(bed)) {
           if (bed) bed.updatedAt = now;
           continue;
         }
-        const last = bed.updatedAt || bed.wateredAt || bed.plantedAt || now;
-        const dt = Math.max(0, Math.min(7200, (now - last) / 1000)); // up to 2h catch-up
+        const lastT = bed.updatedAt || bed.wateredAt || bed.plantedAt || now;
+        const dt = Math.max(0, Math.min(7200, (now - lastT) / 1000)); // up to 2h catch-up
         const before = bed.stage;
         bed.stage = Math.min(3, bed.stage + dt * growRate(bed.size));
         bed.updatedAt = now;
@@ -573,14 +1040,14 @@
       let became = false;
       const now = Date.now();
       for (const bed of save.beds) {
-        if (!bed.flower || !bed.wet || bed.stage >= 3) continue;
+        if (!bedCanGrow(bed)) continue;
         const before = bed.stage;
         bed.stage = Math.min(3, bed.stage + dt * growRate(bed.size));
         bed.updatedAt = now;
         if (before < GH_STAGE.bloom && bed.stage >= GH_STAGE.bloom) became = true;
       }
       if (became && scene !== 'title') {
-        say(scene === 'greenhouse' ? 'Ready to Clip!' : 'A flower is ready to clip!');
+        say(scene === 'greenhouse' ? 'Ready! Tap to move down' : 'A flower is ready!');
         chime('win');
         persist();
       }
@@ -795,7 +1262,45 @@
         ctx.scale(1, 0.82);
         ctx.translate(0, h * 0.05);
       }
-      ctx.drawImage(img, -w / 2, -h, w, h);
+      // Soft sun-bleach on blonde hair (cached per pose; Franz sprites already blonde)
+      let drawImg = img;
+      if (!opts.skipHairLift) {
+        const cacheKey = 'hair|' + key + '|' + save.dress + '|' + ((h / 4) | 0);
+        if (!recolorCache[cacheKey]) {
+          try {
+            const cw = Math.max(1, Math.ceil(w));
+            const ch = Math.max(1, Math.ceil(h));
+            const oc = document.createElement('canvas');
+            oc.width = cw;
+            oc.height = ch;
+            const ox = oc.getContext('2d');
+            ox.drawImage(img, 0, 0, cw, ch);
+            const id = ox.getImageData(0, 0, cw, ch);
+            const d = id.data;
+            const yMax = (ch * 0.28) | 0;
+            for (let py = 0; py < yMax; py++) {
+              for (let px = 0; px < cw; px++) {
+                const i = (py * cw + px) * 4;
+                if (d[i + 3] < 40) continue;
+                const r = d[i];
+                const g = d[i + 1];
+                const b = d[i + 2];
+                if (r > 150 && g > 120 && b < 170 && r >= g && g > b + 15) {
+                  d[i] = Math.min(255, r + 18);
+                  d[i + 1] = Math.min(255, g + 22);
+                  d[i + 2] = Math.min(255, b + 8);
+                }
+              }
+            }
+            ox.putImageData(id, 0, 0);
+            recolorCache[cacheKey] = oc;
+          } catch (e) {
+            recolorCache[cacheKey] = img;
+          }
+        }
+        drawImg = recolorCache[cacheKey] || img;
+      }
+      ctx.drawImage(drawImg, -w / 2, -h, w, h);
       ctx.restore();
       return { h, w, s };
     }
@@ -1104,12 +1609,27 @@
       }
       if (scene === 'greenhouse') {
         if (job) return 'Watering...';
-        if (save.beds.some((b) => b.flower && b.wet && b.stage >= GH_STAGE.bloom)) return 'Tap Clip!';
-        if (save.beds.some((b) => b.flower && !b.wet)) return 'Tap the blue drop!';
-        if ((save.basket.length || save.bouquet.length) && save.beds.some((b) => !b.flower)) return 'Tap a pot!';
+        if (cascadeAnims.length) return 'Hopping down!';
+        if (save.beds.some((b) => bedHasPlant(b) && b.wet && b.stage >= GH_STAGE.bloom && b.size === 'L')) {
+          return 'Tap bouquet for Market!';
+        }
+        if (save.beds.some((b) => bedHasPlant(b) && b.wet && b.stage >= GH_STAGE.bloom)) return 'Tap to move down!';
+        if (save.beds.some((b) => bedHasPlant(b) && b.wet && !b.fueled && growGateFor(b))) {
+          return 'Tap pot — needs honey or bugs!';
+        }
+        if (save.beds.some((b) => bedHasPlant(b) && !b.wet)) return 'Tap the blue drop!';
+        if ((save.basket.length || save.bouquet.length) && save.beds.some((b) => !bedHasPlant(b) && b.size === 'S')) {
+          return 'Tap a small pot!';
+        }
+        if (save.marketBouquets && save.marketBouquets.length) return 'Sell bouquets at Market!';
         if (save.bouquet.length) return 'Plant clips in the meadow!';
-        if (save.beds.some((b) => b.flower)) return 'Growing...';
+        if (save.beds.some((b) => bedHasPlant(b))) return 'Growing...';
         return 'Plant a seed!';
+      }
+      if (scene === 'market') {
+        if (save.marketBouquets && save.marketBouquets.length) return 'Tap Sell bouquet!';
+        if (save.hiveShelf > 0) return 'Sell honey jars!';
+        return 'Bring bouquets from the greenhouse!';
       }
       if (scene === 'hive') {
         // Message must match jar + shelf state (never "full" with empty bench jars)
@@ -1186,10 +1706,12 @@
           job.phase = 'pour';
           job.t = 0.48;
           const bed = save.beds[job.pot];
-          if (bed && bed.flower && !bed.wet) {
+          if (bed && bedHasPlant(bed) && !bed.wet) {
             bed.wet = true;
             bed.wateredAt = Date.now();
             bed.updatedAt = bed.wateredAt;
+            // Small pots grow after water; mid/large wait for a visible resource tap
+            bed.fueled = !growGateFor(bed);
             chime('water');
             persist();
           }
@@ -1276,7 +1798,8 @@
         left += 118;
         drawHearts(left, 22);
         left += 96;
-      } else if (scene === 'greenhouse' || scene === 'plant-meadow') {
+      } else if (scene === 'plant-meadow') {
+        // Meadow keeps a seed count; greenhouse uses seed chips only (no duplicate HUD flower counter)
         panel(left, 10, 100, 46);
         if (art.daisy) ctx.drawImage(art.daisy, left + 6, 14, 20, 26);
         label(String(save.basket.length + save.bouquet.length), left + 62, 34, 18);
@@ -1329,19 +1852,22 @@
       });
     }
 
+    function toastY() {
+      // One fixed message slot per scene — never overlaps zoom, dock, or bottom labels
+      if (scene === 'greenhouse') return 58;
+      if (scene === 'meadow') return logicalH() - 168;
+      if (scene === 'color') return logicalH() - 70;
+      if (scene === 'dress-shop' || scene === 'market') return 118;
+      if (scene === 'bugs') return logicalH() - 120;
+      return 64;
+    }
+
     function drawToast() {
       if (toastT <= 0 || !toast) return;
-      const lh = logicalH();
-      // Dress-shop / market: toast under coach, never over claim/action buttons
-      let y = lh - 78;
-      if (scene === 'meadow') y = lh - 168;
-      else if (scene === 'color') y = lh - 70;
-      else if (scene === 'dress-shop') y = 118;
-      else if (scene === 'market') y = 118;
-      else if (scene === 'bugs') y = lh - 120;
+      const y = toastY();
       const w = Math.min(340, 24 + toast.length * 9);
-      panel((390 - w) / 2, y, w, 44, 'rgba(255,246,234,0.94)');
-      label(toast, 195, y + 22, 16);
+      panel((390 - w) / 2, y, w, 40, 'rgba(255,246,234,0.96)');
+      label(toast, 195, y + 20, 15);
     }
 
     function drawParts(dt) {
@@ -1527,6 +2053,7 @@
           it.got = true;
           runCollected += 1;
           if (save.basket.length < BASKET_MAX) save.basket.push(it.flower);
+          creditSupply('flower', 1);
           const p = runPoint(it.lane, Math.max(0.05, it.z));
           burst(p.x, p.y - 20, it.flower === 'tulip' ? PETAL : it.flower === 'sunflower' ? '#FFD15C' : '#fff');
           chime('pick');
@@ -1722,10 +2249,18 @@
     }
 
     function tapPot(i) {
+      if (cascadeLock) {
+        say('Hopping…');
+        return;
+      }
       const bed = save.beds[i];
       if (!bed) return;
-      const p = potScreenPos(i);
-      if (!bed.flower) {
+      if (!bedHasPlant(bed)) {
+        // Seedlings plant on the TOP tier (small pots)
+        if (GH_SLOTS[i].size !== 'S') {
+          say('Plant seedlings on the top pots!');
+          return;
+        }
         const kind = selected || save.basket[0] || save.bouquet[0] || null;
         if (!kind) {
           say('Pick flowers in the run first');
@@ -1739,10 +2274,13 @@
         bed.flower = kind;
         bed.wet = false;
         bed.stage = 0.15; // seed
-        bed.size = GH_SLOTS[i].size;
+        bed.size = 'S';
         bed.plantedAt = now;
         bed.wateredAt = null;
         bed.updatedAt = now;
+        bed.fueled = false;
+        bed.group = 1;
+        bed.bouquet = null;
         girl.pose = 'stand';
         girl.poseT = 0;
         job = null;
@@ -1759,28 +2297,106 @@
         girl.poseT = 0.8;
         return;
       }
+      // Mid/large need a visible resource before growth runs
+      if (!bed.fueled && growGateFor(bed)) {
+        tryFuelBed(i);
+        return;
+      }
       if (bed.stage >= GH_STAGE.bloom) {
-        const kind = bed.flower;
-        const yieldN = (GH_TIER[bed.size] || GH_TIER.M).yieldN;
-        bed.flower = null;
-        bed.wet = false;
-        bed.stage = 0;
-        bed.plantedAt = null;
-        bed.wateredAt = null;
-        bed.updatedAt = Date.now();
-        for (let n = 0; n < yieldN; n++) save.bouquet.push(kind);
-        save.stars += yieldN;
-        job = null;
-        can = null;
-        girl.pose = 'pick';
-        girl.poseT = 0.4;
-        burst(p.x, p.y - 40, kind === 'sunflower' ? '#FFD15C' : PETAL);
-        chime('win');
-        say(yieldN > 1 ? 'Big clip! Plant them in the meadow' : 'Clipped! Plant it in the meadow');
-        persist();
+        tryCascade(i);
         return;
       }
       say('Still a ' + stageName(bed.stage) + '…');
+    }
+
+    function drawHoneyJarIcon(x, y, s) {
+      s = s || 22;
+      // Toddler-clear honey jar — glass body + cork (never a coin)
+      ctx.fillStyle = 'rgba(255,246,200,0.95)';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x - s * 0.3, y - s * 0.12);
+      ctx.lineTo(x + s * 0.3, y - s * 0.12);
+      ctx.lineTo(x + s * 0.34, y + s * 0.48);
+      ctx.lineTo(x - s * 0.34, y + s * 0.48);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Honey fill
+      ctx.fillStyle = '#F0B429';
+      ctx.beginPath();
+      ctx.moveTo(x - s * 0.28, y + s * 0.05);
+      ctx.lineTo(x + s * 0.28, y + s * 0.05);
+      ctx.lineTo(x + s * 0.32, y + s * 0.46);
+      ctx.lineTo(x - s * 0.32, y + s * 0.46);
+      ctx.closePath();
+      ctx.fill();
+      // Cork lid
+      ctx.fillStyle = '#8B5A2B';
+      ctx.fillRect(x - s * 0.22, y - s * 0.4, s * 0.44, s * 0.2);
+      ctx.strokeRect(x - s * 0.22, y - s * 0.4, s * 0.44, s * 0.2);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillRect(x - s * 0.2, y - s * 0.02, s * 0.1, s * 0.28);
+    }
+
+    function recordWorldBadgeRect(wx, wy, bw, bh, id) {
+      // Convert world (cam) coords → screen for HUD intersection tests
+      const tl = worldToScreen(wx - bw / 2, wy);
+      const br = worldToScreen(wx + bw / 2, wy + bh);
+      potBadgeRects.push({
+        id: id || 'badge',
+        x: Math.min(tl.x, br.x),
+        y: Math.min(tl.y, br.y),
+        w: Math.abs(br.x - tl.x),
+        h: Math.abs(br.y - tl.y),
+      });
+    }
+
+    function drawGateBadge(wx, wy, gate, have) {
+      if (!gate) return;
+      const need = Math.max(1, gate.n | 0);
+      const ok = have >= need;
+      const bw = 72;
+      const bh = 40;
+      recordWorldBadgeRect(wx, wy, bw, bh, 'gate-' + gate.kind);
+      panel(wx - bw / 2, wy, bw, bh, ok ? '#A8E6A1' : '#FFE3A3');
+      if (gate.icon === 'honey' || gate.kind === 'honey') {
+        drawHoneyJarIcon(wx - 16, wy + 20, 26);
+      } else if (gate.icon === 'bug' || gate.kind === 'bug') {
+        const img = art['butterfly-pink'] || art.butterfly;
+        if (img) ctx.drawImage(img, wx - 34, wy + 4, 36, 28);
+        else {
+          ctx.fillStyle = '#E89AD8';
+          ctx.beginPath();
+          ctx.ellipse(wx - 16, wy + 20, 14, 10, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = INK;
+          ctx.stroke();
+        }
+      } else {
+        drawBloomHead('daisy', wx - 14, wy + 34, 28);
+      }
+      label('×' + need, wx + 18, wy + 22, 16, ok ? '#2d5a1e' : INK);
+    }
+
+    function drawLushBouquet(cx, soilY, potW, fh, kinds) {
+      const list = (kinds && kinds.length ? kinds : ['daisy', 'tulip', 'sunflower']).slice();
+      while (list.length < 6) list.push(list[list.length % Math.max(1, kinds && kinds.length ? kinds.length : 3)]);
+      const n = Math.max(6, list.length);
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0.5 : i / (n - 1);
+        const ang = -0.9 + t * 1.8;
+        const ox = Math.sin(ang) * potW * 0.38;
+        const stem = fh * (0.68 + (i % 4) * 0.09);
+        ctx.strokeStyle = '#5FAE4A';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx + ox * 0.12, soilY);
+        ctx.quadraticCurveTo(cx + ox * 0.55, soilY - stem * 0.4, cx + ox, soilY - stem * 0.55);
+        ctx.stroke();
+        drawBloomHead(list[i % list.length], cx + ox, soilY - stem * 0.1, stem * 0.92);
+      }
     }
 
 
@@ -2041,74 +2657,234 @@
       }
     }
 
-    function drawIllustratedPot(wx, footY, w, h) {
-      const img = art.pot;
-      if (img && img.width) {
-        // Franz terracotta sprite (rim, shading, soil) scaled to tier size
-        ctx.drawImage(img, wx - w / 2, footY - h, w, h);
-        return { w, h };
-      }
-      // Fallback: illustrated terracotta with rim + soil
-      const rimH = h * 0.12;
+    function potShapeForSize(size) {
+      // Each tier gets a slightly different terracotta silhouette
+      if (size === 'S') return { top: 0.48, bot: 0.28, rim: 0.18, soil: 0.34, bands: 1 };
+      if (size === 'L') return { top: 0.50, bot: 0.36, rim: 0.13, soil: 0.42, bands: 2 };
+      return { top: 0.47, bot: 0.31, rim: 0.15, soil: 0.38, bands: 2 };
+    }
+
+    function drawIllustratedPot(wx, footY, w, h, size) {
+      size = size || 'M';
+      const sh = potShapeForSize(size);
+      const rimH = Math.max(8, h * sh.rim);
+      const bodyTop = footY - h + rimH;
+      const topW = w * sh.top;
+      const botW = w * sh.bot;
+      // Soft ground shadow
+      ctx.fillStyle = 'rgba(61,52,40,0.22)';
       ctx.beginPath();
-      ctx.moveTo(wx - w * 0.42, footY - h + rimH);
-      ctx.lineTo(wx + w * 0.42, footY - h + rimH);
-      ctx.lineTo(wx + w * 0.32, footY);
-      ctx.lineTo(wx - w * 0.32, footY);
+      ctx.ellipse(wx + 1, footY + 3, botW * 1.05, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Tapered body with strong left→right round shading
+      const grad = ctx.createLinearGradient(wx - topW, bodyTop, wx + topW, footY);
+      grad.addColorStop(0, '#F0B87A');
+      grad.addColorStop(0.22, '#E09A3E');
+      grad.addColorStop(0.55, '#D4894A');
+      grad.addColorStop(0.82, '#B86A32');
+      grad.addColorStop(1, '#8E4A22');
+      ctx.beginPath();
+      ctx.moveTo(wx - topW, bodyTop);
+      ctx.lineTo(wx + topW, bodyTop);
+      ctx.lineTo(wx + botW, footY);
+      ctx.lineTo(wx - botW, footY);
       ctx.closePath();
-      ctx.fillStyle = '#D4894A';
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+      // Subtle clay rings (not loud stripes)
+      for (let i = 1; i <= sh.bands; i++) {
+        const t = 0.28 + i * 0.22;
+        const y = bodyTop + (footY - bodyTop) * t;
+        const ww = topW + (botW - topW) * t;
+        ctx.strokeStyle = 'rgba(90,58,34,0.16)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(wx - ww * 0.85, y);
+        ctx.lineTo(wx + ww * 0.85, y);
+        ctx.stroke();
+      }
+      // Highlight strip on left for roundness
+      ctx.strokeStyle = 'rgba(255,230,190,0.45)';
+      ctx.lineWidth = Math.max(2, w * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(wx - topW * 0.55, bodyTop + 4);
+      ctx.lineTo(wx - botW * 0.45, footY - 4);
+      ctx.stroke();
+      // Rim lip (thick, readable)
+      ctx.fillStyle = '#C4783E';
+      ctx.beginPath();
+      ctx.ellipse(wx, bodyTop, topW * 1.12, rimH * 0.58, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = INK;
       ctx.lineWidth = 2;
       ctx.stroke();
-      ctx.fillStyle = '#C4783E';
+      ctx.fillStyle = '#E8A86A';
       ctx.beginPath();
-      ctx.ellipse(wx, footY - h + rimH * 0.45, w * 0.46, rimH * 0.55, 0, 0, Math.PI * 2);
+      ctx.ellipse(wx, bodyTop - rimH * 0.18, topW * 1.05, rimH * 0.32, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#5A3A22';
+      // Soil bowl
+      ctx.fillStyle = '#4A2E18';
       ctx.beginPath();
-      ctx.ellipse(wx, footY - h + rimH * 0.55, w * 0.34, rimH * 0.35, 0, 0, Math.PI * 2);
+      ctx.ellipse(wx, bodyTop + rimH * 0.1, w * sh.soil, rimH * 0.48, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2E1A0E';
+      ctx.beginPath();
+      ctx.ellipse(wx - w * 0.1, bodyTop + rimH * 0.02, w * 0.1, rimH * 0.2, 0, 0, Math.PI * 2);
       ctx.fill();
       return { w, h };
     }
 
+    function flowerColor(kind) {
+      if (kind === 'tulip') return '#E89AD8';
+      if (kind === 'sunflower') return '#FFD15C';
+      return '#FFF6EA';
+    }
+
+    function drawSprout(x, soilY, h, kind) {
+      const stemH = Math.max(8, h);
+      ctx.strokeStyle = '#5FAE4A';
+      ctx.lineWidth = Math.max(2, stemH * 0.12);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, soilY);
+      ctx.quadraticCurveTo(x + stemH * 0.08, soilY - stemH * 0.5, x, soilY - stemH);
+      ctx.stroke();
+      // Leaves
+      ctx.fillStyle = '#7BC85A';
+      ctx.beginPath();
+      ctx.ellipse(x - stemH * 0.22, soilY - stemH * 0.45, stemH * 0.22, stemH * 0.12, -0.6, 0, Math.PI * 2);
+      ctx.ellipse(x + stemH * 0.22, soilY - stemH * 0.55, stemH * 0.2, stemH * 0.11, 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      // Tiny colored tip so mixed seedlings read by color
+      ctx.fillStyle = flowerColor(kind);
+      ctx.beginPath();
+      ctx.arc(x, soilY - stemH - 1, Math.max(2.5, stemH * 0.14), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function drawBud(x, soilY, h, kind) {
+      drawSprout(x, soilY, h * 0.72, kind);
+      const by = soilY - h;
+      ctx.fillStyle = flowerColor(kind);
+      ctx.beginPath();
+      ctx.ellipse(x, by, h * 0.22, h * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = kind === 'sunflower' ? '#8B5A2B' : '#5FAE4A';
+      ctx.beginPath();
+      ctx.arc(x, by - h * 0.06, h * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawBloomHead(kind, x, soilY, h) {
+      // Prefer art, but crop toward the blossom so small pots stay readable
+      const img = art[kind];
+      if (img && img.width) {
+        const srcH = img.height * 0.62;
+        const srcY = img.height - srcH;
+        const dw = (img.width / srcH) * h;
+        ctx.drawImage(img, 0, srcY, img.width, srcH, x - dw / 2, soilY - h, dw, h);
+        return;
+      }
+      drawFlower(kind, x, soilY, h);
+    }
+
+    function plantHeight(bed, wb) {
+      const size = wb.size;
+      // Readable stage heights — S stays smaller than M/L but never a speck
+      const caps = size === 'S'
+        ? { seed: 14, sprout: 24, bud: 32, bloom: 40 }
+        : size === 'M'
+          ? { seed: 16, sprout: 32, bud: 44, bloom: 54 }
+          : { seed: 18, sprout: 38, bud: 58, bloom: 78 };
+      const st = bed.stage || 0;
+      if (st < GH_STAGE.seed) return caps.seed * 0.7;
+      if (st < GH_STAGE.sprout) return caps.seed + (caps.sprout - caps.seed) * ((st - GH_STAGE.seed) / (GH_STAGE.sprout - GH_STAGE.seed));
+      if (st < GH_STAGE.bud) return caps.sprout + (caps.bud - caps.sprout) * ((st - GH_STAGE.sprout) / (GH_STAGE.bud - GH_STAGE.sprout));
+      if (st < GH_STAGE.bloom) return caps.bud + (caps.bloom - caps.bud) * ((st - GH_STAGE.bud) / (GH_STAGE.bloom - GH_STAGE.bud));
+      return caps.bloom;
+    }
+
     function drawBedPlant(bed, wb) {
-      if (!bed || !bed.flower) return;
-      const soilY = wb.footY - wb.h * 0.86; // soil sits near rim of Franz pot
-      const tierScale = wb.size === 'L' ? 1.05 : wb.size === 'S' ? 0.55 : 0.78;
-      const ready = bed.wet && bed.stage >= GH_STAGE.bloom;
-      let fh;
-      if (!bed.wet || bed.stage < GH_STAGE.seed) {
-        fh = 7 * tierScale;
-      } else if (bed.stage < GH_STAGE.sprout) {
-        fh = (12 + bed.stage * 8) * tierScale;
-      } else if (bed.stage < GH_STAGE.bud) {
-        fh = (18 + (bed.stage / 3) * 28) * tierScale;
-      } else {
-        fh = (26 + (bed.stage / 3) * 48) * tierScale;
-      }
-      if (!bed.wet || bed.stage < GH_STAGE.seed) {
-        ctx.fillStyle = '#5A3A22';
+      if (!bed || !bedHasPlant(bed)) return;
+      const soilY = wb.footY - wb.h * 0.82;
+      const ready = bed.wet && bed.stage >= GH_STAGE.bloom && (bed.fueled || !growGateFor(bed));
+      const needsFuel = bed.wet && !bed.fueled && !!growGateFor(bed);
+      const fh = plantHeight(bed, wb);
+      const kind = bed.flower || (bed.bouquet && bed.bouquet[0]) || 'daisy';
+      const st = bed.stage || 0;
+
+      if (bed.bouquet && bed.bouquet.length) {
+        drawLushBouquet(wb.cx, soilY, wb.w, fh, bed.bouquet);
+      } else if (wb.size === 'M' && (bed.group || 1) > 1) {
+        // Clear same-color cluster — 2–3 distinct blooms sized for the medium pot
+        const n = Math.min(3, Math.max(2, bed.group | 0));
+        for (let i = 0; i < n; i++) {
+          const t = n === 1 ? 0.5 : i / (n - 1);
+          const ox = (t - 0.5) * wb.w * 0.55;
+          if (st < GH_STAGE.sprout) drawSprout(wb.cx + ox, soilY, fh * 0.9, kind);
+          else if (st < GH_STAGE.bud) drawBud(wb.cx + ox, soilY, fh * 0.9, kind);
+          else drawBloomHead(kind, wb.cx + ox, soilY, fh * (0.85 + i * 0.04));
+        }
+      } else if (st < GH_STAGE.seed) {
+        // Colored seed visible in soil
+        ctx.fillStyle = flowerColor(kind);
         ctx.beginPath();
-        ctx.arc(wb.cx, soilY - 1, Math.max(2, 2.8 * tierScale), 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        drawFlower(bed.flower, wb.cx, soilY, fh);
-      }
-      if (!bed.wet) {
-        const dropY = soilY - Math.max(fh, 10) - 6 + Math.sin(time * 6) * 2;
-        ctx.fillStyle = '#7EC8E3';
-        ctx.beginPath();
-        ctx.arc(wb.cx, dropY, 6, 0, Math.PI * 2);
+        ctx.ellipse(wb.cx, soilY - 2, 4, 3, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = INK;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.2;
         ctx.stroke();
+      } else if (st < GH_STAGE.sprout) {
+        drawSprout(wb.cx, soilY, fh, kind);
+      } else if (st < GH_STAGE.bud) {
+        drawBud(wb.cx, soilY, fh, kind);
+      } else {
+        // Bloom — single readable flower (S stays smaller via plantHeight)
+        ctx.strokeStyle = '#5FAE4A';
+        ctx.lineWidth = Math.max(2, fh * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(wb.cx, soilY);
+        ctx.lineTo(wb.cx, soilY - fh * 0.35);
+        ctx.stroke();
+        drawBloomHead(kind, wb.cx, soilY, fh);
+      }
+
+      if (!bed.wet) {
+        // Water cue beside the plant — never covering the seedling
+        const dropX = wb.cx + wb.w * 0.38;
+        const dropY = soilY - Math.max(fh * 0.55, 14) + Math.sin(time * 6) * 2;
+        ctx.fillStyle = '#7EC8E3';
+        ctx.beginPath();
+        ctx.moveTo(dropX, dropY - 7);
+        ctx.bezierCurveTo(dropX + 7, dropY, dropX + 5, dropY + 8, dropX, dropY + 9);
+        ctx.bezierCurveTo(dropX - 5, dropY + 8, dropX - 7, dropY, dropX, dropY - 7);
+        ctx.fill();
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      } else if (needsFuel) {
+        drawGateBadge(wb.cx, soilY - Math.max(fh, 16) - 44, growGateFor(bed), supplyOf(growGateFor(bed).kind));
       } else if (ready) {
-        const cw = wb.size === 'S' ? 36 : 48;
-        panel(wb.cx + 4, soilY - fh - 2, cw, 18, '#FFD15C');
-        label('Clip', wb.cx + 4 + cw / 2, soilY - fh + 8, 10);
+        const cw = wb.size === 'S' ? 40 : wb.size === 'M' ? 48 : 56;
+        const tag = wb.size === 'L' ? 'Sell' : '↓';
+        const tagY = soilY - fh - 24;
+        recordWorldBadgeRect(wb.cx, tagY, cw, 18, 'tag-' + tag);
+        panel(wb.cx - cw / 2, tagY, cw, 18, '#FFD15C');
+        label(tag, wb.cx, tagY + 10, 11);
+        const cg = cascadeGateFor(bed);
+        if (cg && wb.size !== 'L') {
+          drawGateBadge(wb.cx, soilY - fh - 70, cg, supplyOf(cg.kind));
+        }
       }
     }
 
@@ -2123,8 +2899,14 @@
       );
     }
 
+    function pushHudRect(id, x, y, w, h) {
+      ghHudRects.push({ id, x, y, w, h });
+    }
+
     function drawGreenhouse() {
       const lh = logicalH();
+      potBadgeRects = [];
+      ghHudRects = [];
       clampGhCam();
       ctx.save();
       ctx.beginPath();
@@ -2144,9 +2926,14 @@
       for (let i = 0; i < POTS.length; i++) {
         const bed = save.beds[i];
         const wb = potWorldBounds(i);
-        drawIllustratedPot(wb.cx, wb.footY, wb.w, wb.h);
-        drawBedPlant(bed, wb);
+        // Hide source pot art while it hops in a cascade anim
+        const hopping = cascadeAnims.some((a) => a.fromIx === i);
+        if (!hopping) {
+          drawIllustratedPot(wb.cx, wb.footY, wb.w, wb.h, wb.size);
+          drawBedPlant(bed, wb);
+        }
       }
+      drawCascadeAnims();
       ctx.restore();
 
       // Haven stands on the floor in front of the stand (stand is taller than her)
@@ -2155,25 +2942,54 @@
         drawBasket(118, lh - Math.min(havenH(), 118) * 0.42, save.bouquet.length ? save.bouquet : save.basket);
       }
       if (can) drawCan(can.x, can.y, can.tilt);
-      const chips = uniqueBasket();
-      let cx0 = 12;
-      chips.forEach((c) => {
-        const on = selected === c.kind;
-        buttons.push({ id: 'chip-' + c.kind, x: cx0, y: 64, w: 74, h: 54 });
-        panel(cx0, 64, 74, 54, on ? '#FFE3A3' : CREAM);
-        drawFlower(c.kind, cx0 + 24, 112, 40);
-        label(String(c.n), cx0 + 56, 90, 16);
-        cx0 += 80;
-      });
-      if (save.bouquet.length) {
-        button('go-plant-meadow', 250, 64, 128, 46, 'To meadow', '#A8E6A1');
+
+      // Fixed message slot (toast or coach) — never overlaps zoom / plants
+      const msgY = toastY();
+      if (!(toastT > 0 && toast)) coach(hint(), msgY);
+      pushHudRect('message', 20, msgY, 350, 40);
+
+      // Supply strip — labeled honey jar + butterfly (never a coin icon)
+      const stripY = 104;
+      panel(12, stripY, 168, 50, '#FFF6EA');
+      pushHudRect('supplies', 12, stripY, 168, 50);
+      drawHoneyJarIcon(36, stripY + 24, 24);
+      label('honey', 36, stripY + 44, 10, '#6d6256');
+      label(String(supplyOf('honey')), 58, stripY + 22, 16);
+      const bugImg = art['butterfly-pink'] || art.butterfly;
+      if (bugImg) ctx.drawImage(bugImg, 88, stripY + 6, 34, 26);
+      else {
+        ctx.fillStyle = '#E89AD8';
+        ctx.beginPath();
+        ctx.ellipse(105, stripY + 22, 14, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
-      button('gh-zoom-out', 334, 118, 46, 40, '−', CREAM);
-      button('gh-zoom-in', 334, 166, 46, 40, '+', CREAM);
-      panel(70, lh - 52, 250, 36, '#FFE3A3');
-      label('13 pots · + to zoom', 195, lh - 32, 13);
-      coach(hint(), chips.length ? 126 : 64);
+      label('bugs', 105, stripY + 44, 10, '#6d6256');
+      label(String(supplyOf('bug')), 130, stripY + 22, 16);
+
+      // Seed chips (selection only — not a second total flower counter)
+      const chips = uniqueBasket();
+      let cx0 = 188;
+      chips.slice(0, 2).forEach((c) => {
+        const on = selected === c.kind;
+        buttons.push({ id: 'chip-' + c.kind, x: cx0, y: stripY, w: 64, h: 50 });
+        panel(cx0, stripY, 64, 50, on ? '#FFE3A3' : CREAM);
+        pushHudRect('chip-' + c.kind, cx0, stripY, 64, 50);
+        drawBloomHead(c.kind, cx0 + 22, stripY + 42, 32);
+        label(String(c.n), cx0 + 48, stripY + 24, 14);
+        cx0 += 68;
+      });
+      if (save.marketBouquets && save.marketBouquets.length) {
+        button('go-market', 268, stripY, 110, 50, 'Market', '#FFD15C');
+        pushHudRect('go-market', 268, stripY, 110, 50);
+      }
+      button('gh-zoom-out', 334, 168, 46, 40, '−', CREAM);
+      button('gh-zoom-in', 334, 216, 46, 40, '+', CREAM);
+      pushHudRect('zoom-out', 334, 168, 46, 40);
+      pushHudRect('zoom-in', 334, 216, 46, 40);
       hud();
+      // Top HUD chrome (Back / stars / coins / mute / menu)
+      pushHudRect('back', 10, 10, 78, 46);
+      pushHudRect('topbar', 96, 10, 250, 46);
       if (placesOpen) drawPlacesMenu();
     }
 
@@ -2475,6 +3291,7 @@
       pourT = 0.65;
       pourJar = i;
       chime('win');
+      creditSupply('honey', 1);
       if (save.jarFull.every(Boolean) && save.hiveShelf >= HIVE_SHELF_MAX) say('Pantry is full!');
       else say('Honey on the shelf!');
       persist();
@@ -2589,6 +3406,7 @@
       if (!anim) return;
       bugCaughtSession += 1;
       save.bugs += 1;
+      creditSupply('bug', 1);
       atriumBugs = Math.min(BUG_GOAL, atriumBugs + 1);
       burst(anim.jarX, anim.jarY, '#FFD15C');
       const b = anim.bug;
@@ -3122,39 +3940,95 @@
     }
 
     /* ---------- MARKET ---------- */
+    function drawMarketBouquetPot(cx, footY, kinds) {
+      const pw = 78;
+      const ph = 86;
+      drawIllustratedPot(cx, footY, pw, ph, 'L');
+      const soilY = footY - ph * 0.82;
+      // Same lush mixed bouquet language as the bottom-tier greenhouse pot
+      drawLushBouquet(cx, soilY, pw, 72, kinds);
+    }
+
+    function drawEmptyBouquetSlot(cx, footY) {
+      const pw = 70;
+      const ph = 78;
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      drawIllustratedPot(cx, footY, pw, ph, 'L');
+      ctx.restore();
+      label('Bring a pot', cx, footY + 18, 13, '#6d6256');
+    }
+
     function drawMarket() {
       const lh = logicalH();
       drawCover(art.meadow);
       // Stall (simple; Franz UI kit will reskin)
-      panel(30, lh * 0.22, 330, lh * 0.52, '#F5E6C8');
-      label("Farmer's Market", 195, lh * 0.22 + 28, 24);
-      label('Tap to sell · coins to purse', 195, lh * 0.22 + 54, 14, '#6d6256');
+      panel(30, lh * 0.18, 330, lh * 0.58, '#F5E6C8');
+      label("Farmer's Market", 195, lh * 0.18 + 28, 24);
+      label('Tap to sell · coins stay in purse', 195, lh * 0.18 + 54, 14, '#6d6256');
       const jarPrice = 3;
       const flowerPrice = 2;
-      round(50, lh * 0.22 + 80, 130, 120, 14);
+      const top = lh * 0.18;
+      // Bouquet cart — show bouquet POTS, not loose daisies
+      round(50, top + 66, 290, 150, 14);
       ctx.fillStyle = CREAM;
       ctx.fill();
       ctx.strokeStyle = INK;
       ctx.stroke();
-      label('Honey jars', 115, lh * 0.22 + 100, 14);
-      label(String(save.hiveShelf) + ' ready', 115, lh * 0.22 + 124, 16);
-      label('◉' + jarPrice + ' each', 115, lh * 0.22 + 148, 14, '#6d6256');
-      button('sell-jar', 60, lh * 0.22 + 160, 110, 40, 'Sell jar', '#FFD15C');
-      round(210, lh * 0.22 + 80, 130, 120, 14);
+      label('Bouquets', 255, top + 86, 16);
+      const bq = save.marketBouquets || [];
+      label(String(bq.length) + ' ready · ◉' + BOUQUET_SELL_PRICE + ' each', 255, top + 108, 12, '#6d6256');
+      if (bq[0]) {
+        drawMarketBouquetPot(110, top + 198, bq[0].kinds);
+      } else {
+        drawEmptyBouquetSlot(110, top + 188);
+      }
+      if (bq.length) {
+        button('sell-bouquet', 200, top + 128, 128, 52, 'Sell bouquet', '#FFD15C');
+      } else {
+        // Greyed out — not tappable
+        panel(200, top + 128, 128, 52, '#D8D0C4');
+        label('Sell bouquet', 264, top + 154, 15, '#8a8074');
+      }
+      round(50, top + 232, 130, 88, 14);
       ctx.fillStyle = CREAM;
       ctx.fill();
       ctx.stroke();
-      label('Flowers', 275, lh * 0.22 + 100, 14);
+      label('Honey jars', 115, top + 250, 14);
+      label(String(save.hiveShelf) + ' ready', 115, top + 270, 15);
+      label('◉' + jarPrice + ' each', 115, top + 288, 13, '#6d6256');
+      button('sell-jar', 60, top + 298, 110, 34, 'Sell jar', '#FFD15C');
+      round(210, top + 232, 130, 88, 14);
+      ctx.fillStyle = CREAM;
+      ctx.fill();
+      ctx.stroke();
+      label('Flowers', 275, top + 250, 14);
       const flowerStock = save.bouquet.length + save.basket.length;
-      label(String(flowerStock) + ' ready', 275, lh * 0.22 + 124, 16);
-      label('◉' + flowerPrice + ' each', 275, lh * 0.22 + 148, 14, '#6d6256');
-      button('sell-flower', 220, lh * 0.22 + 160, 110, 40, 'Sell flower', '#A8E6A1');
-      panel(120, lh * 0.78, 150, 54, '#FFE08A');
-      label('Purse ◉ ' + save.coins, 195, lh * 0.78 + 28, 18);
-      drawHaven(70, lh - 8, havenH(), 1);
-      coach(hint(), 64);
+      label(String(flowerStock) + ' ready', 275, top + 270, 15);
+      label('◉' + flowerPrice + ' each', 275, top + 288, 13, '#6d6256');
+      button('sell-flower', 220, top + 298, 110, 34, 'Sell flower', '#A8E6A1');
+      panel(120, lh * 0.82, 150, 54, '#FFE08A');
+      label('Purse ◉ ' + save.coins, 195, lh * 0.82 + 28, 18);
+      drawHaven(70, lh - 8, Math.min(havenH(), 110), 1);
+      if (!(toastT > 0 && toast)) coach(hint(), toastY());
       hud();
       if (placesOpen) drawPlacesMenu();
+    }
+
+    function sellBouquet() {
+      if (!save.marketBouquets || !save.marketBouquets.length) {
+        // Disabled state: tap does nothing (no toast spam)
+        return false;
+      }
+      save.marketBouquets.shift();
+      save.stats.sales = (save.stats.sales | 0) + 1;
+      save.stats.bouquetsSold = (save.stats.bouquetsSold | 0) + 1;
+      // Exact +5 — skip auto milestone prizes so purse delta is the sell price
+      addCoins(BOUQUET_SELL_PRICE, 195, 360, { skipRewards: true });
+      say('Sold bouquet! +' + BOUQUET_SELL_PRICE);
+      chime('win');
+      persist();
+      return true;
     }
 
     function sellJar() {
@@ -3434,7 +4308,8 @@
         return;
       }
       if (id === 'back') {
-        if (scene === 'plant-meadow') go('greenhouse');
+        if (scene === 'plant-meadow' || scene === 'market') go('greenhouse');
+        else if (scene === 'dress-shop') go('title');
         else go('meadow', { skipIntro: 1 });
         return;
       }
@@ -3444,6 +4319,10 @@
       }
       if (id === 'go-plant-meadow') {
         go('plant-meadow');
+        return;
+      }
+      if (id === 'go-market') {
+        go('market');
         return;
       }
       if (id === 'go-hive') {
@@ -3543,6 +4422,10 @@
       }
       if (id === 'sell-flower') {
         sellFlower();
+        return;
+      }
+      if (id === 'sell-bouquet') {
+        sellBouquet();
         return;
       }
       if (id === 'shop-tab-dresses') { shopTab = 'dresses'; return; }
@@ -3732,6 +4615,7 @@
       }
       girl.poseT = Math.max(0, girl.poseT - dt);
       grow(dt);
+      updateCascadeAnims(dt);
       updateWater(dt);
       if (scene === 'hive' && !bee.drag) {
         const dx = bee.tx - bee.x;
@@ -3803,6 +4687,7 @@
         try { art[n] = await loadImage('./art/' + n + '.' + ext); } catch (e) { art[n] = undefined; }
       }),
     ]).then(() => {
+      settlePendingCascades();
       catchUpGrowth();
       ready = true;
       announce("Haven's Garden is ready");
@@ -3869,23 +4754,92 @@
       getMeadowPlants: () => save.meadowPlants.slice(),
       getBouquet: () => save.bouquet.slice(),
       clipBed: (i) => {
-        const bed = save.beds[i];
-        if (!bed || !bed.flower || bed.stage < GH_STAGE.bloom) return false;
-        tapPot(i);
-        return true;
+        // Legacy clip → bouquet (keeps existing meadow tests). Gameplay taps use cascade.
+        return harvestBloomToBouquet(i | 0);
       },
       doPlantAt: (i, _u, kind) => {
-        selected = kind || selected;
+        // Test harness: plant a seed into any slot (gameplay taps only plant on small pots).
+        i = i | 0;
         const bed = save.beds[i];
-        if (bed) {
-          bed.flower = null;
-          bed.wet = false;
-          bed.stage = 0;
-          bed.plantedAt = null;
-          bed.wateredAt = null;
-          bed.updatedAt = null;
+        if (!bed) return;
+        const plantKind = FLOWERS.includes(kind) ? kind : FLOWERS.includes(selected) ? selected : 'daisy';
+        selected = plantKind;
+        if (!takeSeed(plantKind)) {
+          // Allow forced plant when basket is empty (screenshot harnesses)
         }
-        tapPot(i);
+        clearBed(bed, GH_SLOTS[i].size);
+        bed.flower = plantKind;
+        bed.wet = false;
+        bed.stage = 0.15;
+        bed.size = GH_SLOTS[i].size;
+        bed.plantedAt = Date.now();
+        bed.updatedAt = bed.plantedAt;
+        bed.group = 1;
+        persist();
+      },
+      tryCascade: (i) => tryCascade(i | 0),
+      tryFuelBed: (i) => tryFuelBed(i | 0),
+      tryHarvestBouquet: (i) => tryHarvestBouquet(i | 0),
+      sellBouquet,
+      grantGhSupply: (kind, n) => {
+        creditSupply(kind, n == null ? 1 : n);
+        persist();
+        return Object.assign({}, save.ghSupply);
+      },
+      getGhSupply: () => Object.assign({}, save.ghSupply || {}),
+      getMarketBouquets: () => (save.marketBouquets || []).map((b) => ({ kinds: b.kinds.slice(), id: b.id })),
+      forceBloom: (i) => {
+        const bed = save.beds[i | 0];
+        if (!bed || !bedHasPlant(bed)) return false;
+        bed.wet = true;
+        bed.fueled = true;
+        bed.stage = 3;
+        bed.wateredAt = Date.now();
+        bed.updatedAt = bed.wateredAt;
+        persist();
+        return true;
+      },
+      advanceCascade: (dt) => {
+        updateCascadeAnims(dt == null ? 1 : dt);
+        return cascadeAnims.length;
+      },
+      getCascadeAnims: () => cascadeAnims.map((a) => ({ fromIx: a.fromIx, toIx: a.toIx, t: a.t, max: a.max })),
+      clearToast: () => { toast = ''; toastT = 0; },
+      BOUQUET_SELL_PRICE,
+      GH_GATE,
+      getPotBadgeRects: () => potBadgeRects.map((r) => Object.assign({}, r)),
+      getGhHudRects: () => ghHudRects.map((r) => Object.assign({}, r)),
+      potBadgesClearOfHud: () => {
+        const pad = 1;
+        const overlaps = [];
+        potBadgeRects.forEach((b) => {
+          ghHudRects.forEach((h) => {
+            const hit = !(
+              b.x + b.w <= h.x + pad ||
+              h.x + h.w <= b.x + pad ||
+              b.y + b.h <= h.y + pad ||
+              h.y + h.h <= b.y + pad
+            );
+            if (hit) overlaps.push({ badge: b.id, hud: h.id });
+          });
+        });
+        return { ok: overlaps.length === 0, overlaps, badges: potBadgeRects.length, hud: ghHudRects.length };
+      },
+      getBedVisual: (i) => {
+        const bed = save.beds[i | 0];
+        if (!bed) return null;
+        const wb = potWorldBounds(i | 0);
+        return {
+          size: bed.size,
+          flower: bed.flower,
+          stage: bed.stage,
+          wet: !!bed.wet,
+          group: bed.group | 0,
+          bouquetN: bed.bouquet ? bed.bouquet.length : 0,
+          plantH: bedHasPlant(bed) ? plantHeight(bed, wb) : 0,
+          potTaper: potShapeForSize(wb.size),
+          needsFuel: !!(bed.wet && !bed.fueled && growGateFor(bed)),
+        };
       },
       migrateBedsTest: (raw) => migrateBeds(raw),
       catchUpGrowth,
@@ -4264,6 +5218,9 @@
         };
       },
       getMarketUI: () => ({
+        sellBouquetEnabled: !!(save.marketBouquets && save.marketBouquets.length),
+        hasSellBouquetBtn: buttons.some((b) => b.id === 'sell-bouquet'),
+        bouquetReady: (save.marketBouquets || []).length,
         hasSellJar: buttons.some((b) => b.id === 'sell-jar'),
         hasSellFlower: buttons.some((b) => b.id === 'sell-flower'),
       }),

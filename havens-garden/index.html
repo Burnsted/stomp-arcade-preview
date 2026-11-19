@@ -31,14 +31,14 @@
 <body>
   <canvas id="game" aria-label="Haven's Garden"></canvas>
   <div id="live" aria-live="polite"></div>
-  <div id="ver">v0.1.9-grokbuild-improved</div>
+  <div id="ver">v0.1.12-grokbuild-improved</div>
   <script src="js/garden.js"></script>
   <script>
     (function () {
       const canvas = document.getElementById('game');
       const live = document.getElementById('live');
       window.HavensGarden = Garden.start(canvas, (t) => { if (live) live.textContent = t; });
-      if ('serviceWorker' in navigator) {
+      if (navigator.serviceWorker && typeof navigator.serviceWorker.register === 'function') {
         navigator.serviceWorker.register('./sw.js').catch(() => {});
       }
     })();
