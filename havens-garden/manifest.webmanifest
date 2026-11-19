@@ -1,0 +1,10 @@
+{
+  "name": "Haven's Garden",
+  "short_name": "Haven Garden",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#8fd4f0",
+  "theme_color": "#7EC8E3",
+  "orientation": "portrait",
+  "icons": []
+}
