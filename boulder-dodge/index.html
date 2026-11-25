@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <title>Boulder Dodge</title>
+<link rel="icon" href="./favicon.svg">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{width:100%;height:100%;overflow:hidden;background:#d6e4f0;touch-action:none;font-family:system-ui,sans-serif}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a4060;touch-action:none;font-family:system-ui,sans-serif}
 canvas{display:block;width:100%;height:100%}
 #ui{position:fixed;inset:0;pointer-events:none;z-index:2}
 #ui button{pointer-events:auto;border:0;cursor:pointer}
@@ -27,25 +28,10 @@ canvas{display:block;width:100%;height:100%}
 .sheetNav .ic{display:block;font-size:18px;margin-bottom:2px}
 .tag{opacity:.7;font-size:12px;margin-top:10px;color:#3a5070}
 #menu .lvl{opacity:.9;margin:2px 0 4px;font:800 13px system-ui;color:#1e3a5f}
-.sheet{text-align:left;max-width:420px;margin:8vh auto 0;background:rgba(11,24,48,.92);border:1px solid #fff3;border-radius:14px;padding:14px;color:#eef6ff}
-.sheet h2{font:800 18px system-ui;margin:0 0 8px;color:#fff}
-.sheet p,.sheet li{font:500 14px/1.45 system-ui;color:#d5e6f4}
-.sheet button.back,.locker button.back{margin-top:14px;padding:8px 10px;border:0;background:none;color:#eef6ff;font:800 14px system-ui;cursor:pointer;text-shadow:0 0 14px rgba(159,211,255,.9),0 1px 3px rgba(0,0,0,.65)}
-.locker{max-width:420px;margin:4vh auto 0;padding:16px 14px 18px;color:#eef6ff;background:linear-gradient(165deg,#243a55,#101c2e);border:1px solid #ffffff33;border-radius:16px;text-align:center}
-.locker h2{font:900 22px system-ui;color:#fff;margin:0 0 4px}
-.locker .meta{font:700 12px system-ui;color:#9fd3ff;margin:0 0 10px}
-.locker .stage{margin:0 auto 12px;width:210px;height:160px;border-radius:12px;background:linear-gradient(180deg,#6aa0c8,#d8e8f4 55%,#eef4fa);position:relative;overflow:hidden}
-.locker .stage canvas{display:block;width:100%;height:100%}
-.locker .sec{font:800 11px system-ui;letter-spacing:.08em;color:#9fd3ff;text-align:left;margin:10px 0 6px;text-transform:uppercase}
-.rack,.looks{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:flex-start}
-.rack button,.looks button{background:none;border:0;padding:0;cursor:pointer;width:78px;color:#cfe3f4;font:700 10px/1.25 system-ui;white-space:normal}
-.rack button.eq .deck{outline:2px solid #ffd84a;outline-offset:3px}
-.looks button.eq .sw{box-shadow:0 0 0 2px #ffd84a}
-.rack button.lock,.looks button.lock{opacity:.5}
-.rack .deck{width:64px;height:12px;margin:0 auto 6px;border-radius:3px 3px 2px 2px;box-shadow:0 3px 0 rgba(0,0,0,.35)}
-.looks .sw{width:36px;height:36px;margin:0 auto 5px;border-radius:50%;border:2px solid #fff6}
-.rack .nm,.looks .nm{display:block;margin:2px auto 0;max-width:74px;line-height:1.2}
-.rack .need,.looks .need{display:block;margin:6px auto 0;max-width:74px;color:#ffd84a;font:700 9px/1.25 system-ui}
+.sheet{text-align:left;max-width:420px;margin:8vh auto 0;background:rgba(11,24,48,.88);border:1px solid #fff3;border-radius:14px;padding:14px}
+.sheet h2{font:800 18px system-ui;margin:0 0 8px}
+.sheet p,.sheet li{font:500 14px/1.45 system-ui;opacity:.92}
+.sheet button.back{margin-top:12px;min-height:40px;padding:0 12px;border-radius:10px;background:#2a3a55;color:#fff;font:800 13px system-ui}
 </style>
 </head>
 <body>
@@ -59,193 +45,80 @@ canvas{display:block;width:100%;height:100%}
 <script>
 (function(){
 'use strict';
-var VER='0.9.61-lives-gate';
-var BUILD_ID='0.9.61-lives-gate';
-/* Resort backdrop: 1 dense Alto-face (ship), 2 mid density, 3 extra trail/lodge detail */
-var RESORT_STYLE=1;
+var VER='0.9.21-fair';
 var cv=document.getElementById('cv'),cx=cv.getContext('2d');
 var W=390,H=844,scale=1,OY=0,dpr=1;
-var GROUND=268,G=3400,JV=-1700,DT=1/120; /* hang ≈1.0s: 0.6±0.15s jump still clears rock width */
-var COYOTE=0.09,BUFFER=0.11;
+var GROUND=268,G=3400,JV=-980,DT=1/120;
+var COYOTE=0.09,BUFFER=0.11,HOLD_CUT=0.62;
 var LIVES_MAX=5,lives=LIVES_MAX;
+/* Grom 1: sit (L1+) still; ride (L2+) moves at ~60% player speed. Native 1x, ≤70% rider H. */
 var GROM_SPD_FRAC=0.60,GROM_HIT=0.80,GROM_CLEAR_PTS=35,GROM_PAD_T=1.2;
+/* Air spin — taps only; half-turns, max 720; finish in a normal fall (raise rate, not height) */
 var SPIN_HALF=180,SPIN_MAX=720,SPIN_TOL=30;
-var SPIN_LIFT=Math.round(Math.abs(JV)*0.18); /* follows JV */
-var SPIN_RATE=(SPIN_MAX*Math.PI/180)/0.42;
+var SPIN_LIFT=Math.round(Math.abs(JV)*0.18); /* once/airtime · ~18% of jump impulse */
+var SPIN_RATE=(SPIN_MAX*Math.PI/180)/0.42; /* rad/s — 720° inside normal hang */
 var SPIN_PTS={360:100,540:150,720:300};
+/* Hold-to-flip matches Terrain Park; tap ≤TAP_MS so holds are never spins. No lift from hold. */
 var TAP_MS=150,FLIP_RATE=11.2,FLIP_TOL=SPIN_TOL*Math.PI/180;
+/* TP-style: ignore residual flip from a plain jump hold; only real flips (≥~70°) are judged */
 var FLIP_CRASH_MIN=1.2;
-var ROCK_HIT=0.70,ROCK_BURY=0.38; /* hitbox ≈70% of art; bury so only protruding volume counts */
-var APEX_HUD_PAD=36;
+/* Rock hitbox slightly smaller than art; base buried in snow (not a rolling cannonball) */
+var ROCK_HIT=0.55,ROCK_BURY=0.34;
+/* Apex: rider (head) never above 35% of screen from top / never under HUD */
+var APEX_TOP_FRAC=0.35,APEX_HUD_PAD=96;
 var BPM=128,BEAT=60/BPM,SPD=350;
 var TER=[1.1,2.4,0.7],RUN_SEED=0;
-/* Painted rock variants (1 soft bands, 2 facet, 3 warm rim). Ship best match to slope. */
-var ROCK_PAINT=1;
-/* Standing rider+board = RIDER_H_FRAC of playfield (~85 CSS @390×844) */
+/* Standing rider+board as fraction of playfield height (9–11%). Single scale lock — never grow for detail. */
 var RIDER_H_FRAC=0.10;
-var RIDER_LOCAL_H=94;
-var RIDER_ATLAS_H=85;
-var ART_CFG={dir:'art/',atlas:'bd-atlas',rig:'bd-rider-rig@1x.webp',rigMeta:'bd-rider-rig.json'};
-var ART={ok:false,dpr:1,atlas:null,rig:null,rigMeta:null,bg:{},bgLoading:{}};
+var RIDER_LOCAL_H=94; /* vector fallback local units */
+var RIDER_ATLAS_H=85; /* ride frame h @1x CSS px */
+/* Art: 1x atlas always; resort backdrops lazy-load per level (file-swap ready). */
+var ART_CFG={dir:'art/',atlas:'bd-atlas'};
+var ART={ok:false,dpr:1,atlas:null,bg:{},bgLoading:{}};
 var THEME={sky:['#5aa0d0','#9ecce8','#e6f3fb'],snow:'#f4f9fd',shade:'#aec6da',accent:'#e8772e',ink:'#14213d',
   far:'#4a6a88',mid:'#5f82a2',near:'#6f96b4',forest:'#2a4a40',nearSnow:'#d9e6f0'};
-var KIT={jacket:'#c4a06a',jacketHi:'#d8bc8e',jacketShade:'#1a1a1e',pants:'#16181c',pantsHi:'#3a3e46',helmet:'#12161c',helmetRim:'#2a3038',goggle:'#1a222c',lens:'#5ec8ff',lensHi:'#d0f4ff',mitten:'#1a1a1e',boot:'#0e1218',skin:'#e8b890',board:'#e8eef4',boardStripe:'#9fd3ff',boardEdge:'#3a4555',rim:'rgba(255,255,255,.45)',outline:'#0e141c'};
-/* Man1 ride-frame cutout rig (Terrain Park pipeline) — each layer once */
-var RIG_PARTS=['board','thighB','shinB','bootB','armB','torso','thighF','shinF','bootF','armF','head'];
-var RIG_DRAW_COUNTS=null; /* fail-test: each part drawn ≤1 per paint */
+var KIT={jacket:'#1e3a5f',jacketHi:'#4a7ab0',jacketShade:'#142846',pants:'#2a3344',pantsHi:'#5a6a80',beanie:'#e8772e',beanieRib:'#c45e18',pom:'#f4f1ea',goggle:'#1a222c',lens:'#5ec8ff',lensHi:'#d0f4ff',mitten:'#2a3548',boot:'#121820',skin:'#e8b890',board:'#e8772e',boardStripe:'#ffd0a0',boardEdge:'#14213d',rim:'rgba(255,255,255,.55)',outline:'#0e141c'};
 
-function fairGap(pad){return Math.round(SPD*(2*Math.abs(JV)/G)+(pad==null?110:pad));}
-function beatUnit(){return Math.round(SPD*BEAT);}
-/* Ted hard rule: ONLY two rates — 1.0x world props, ≤0.02x far ridge/sky. No mid band. */
-var FAR_PAR=0.01;
-var LOOK_AHEAD_S=1.4; /* obstacles must be visible this long before contact */
-var CAM_Y=268; /* heavily smoothed terrain baseline — never follows rider.y */
-/* Compact beat charts: event codes only — spacing is seeded irregular gaps */
-var CHART_SRC={
-  ridge:'t:2,s:2,s:2.2,m:2.4,d:3.2,c:2.4,s:2,g:3.2,r:2.6,m:2.2,s:2,m:2.4,c:2.4,s:2,d:3.2,L:2.6,r:2.8,m:2.2',
-  field:'s:1.5,s:1.5,m:2,g:2.8,s:1.5,d:3,c:2.2,m:1.8,s:1.5,s:1.5,r:2.4,g:2.8,m:1.8,L:2.4,d:3,s:1.6,c:2.2,m:2',
-  lake:'m:2.5,s:2,d:3.5,s:2,m:2.5,g:3.2,c:2.5,r:2.8,L:2.8,d:3.5,s:2,m:2.2,g:3.2,s:2,c:2.4,m:2.5,d:3.5,L:2.8',
-  bowl:'s:1,s:1,m:2,g:2.6,s:1,s:1.2,d:2.8,c:2,m:1.5,s:1,r:2.2,L:2.4,g:2.6,s:1,s:1,d:2.8,c:2,m:1.6,s:1.2,L:2.4'
-};
-var CHART_MAP={t:'teach',s:'rockS',m:'rockM',L:'rockL',d:'double',g:'stagger',c:'coyote',r:'grom'};
-var GAP_MULS=[0.6,0.8,1.0,1.4,1.9,2.6];
-var GAP_MULS_WIDE=[1.4,1.9,2.6];
-function makeChart(src,seed,earlyWideS){
-  /* Irregular gaps: base*GAP_MULS with base sized so min mul ≥ air+settle (no clamp collapse).
-     Never the same gap twice in a row; prefer unused muls until ≥5 distinct per chart.
-     earlyWideS: force mul≥1.4 for the first N seconds (L1 onboarding). */
-  seed=seed|0;
-  var bu=beatUnit(),minG=fairGap(40),base=Math.ceil(minG/GAP_MULS[0]),x=Math.round(3.2*bu);
-  var earlyUntil=Math.round(SPD*(earlyWideS||0));
-  var c=[],i,p,prev=-1,mul,gap,j,idx,seen={},distinct=0,cands,fresh,pool;
-  src=src.split(',');
-  for(i=0;i<src.length;i++){
-    p=src[i].split(':');
-    c.push({x:Math.round(x),t:CHART_MAP[p[0]]});
-    pool=x<earlyUntil?GAP_MULS_WIDE:GAP_MULS;
-    cands=[];
-    for(j=0;j<pool.length;j++){
-      gap=Math.round(base*pool[j]);
-      if(gap!==prev)cands.push(pool[j]);
-    }
-    if(!cands.length)cands=pool.slice();
-    if(distinct<5){
-      fresh=cands.filter(function(m){return !seen[Math.round(base*m)];});
-      if(fresh.length)cands=fresh;
-    }
-    idx=(hash01(seed*19.1+i*7.3)*cands.length)|0;
-    mul=cands[idx];
-    gap=Math.round(base*mul);
-    if(!seen[gap]){seen[gap]=1;distinct++;}
-    prev=gap;
-    x+=Math.max(minG,gap);
-  }
-  return{chart:c,len:Math.round(x+bu*1.4)};
+/* fairGap: travel during a natural quick-tap jump + land pad (GD L1 forgiving) */
+function fairGap(pad){
+  var hang=2*Math.abs(JV)/G; /* full hang without HOLD_CUT */
+  var tapHang=hang*0.72; /* early release shortens airtime */
+  return Math.round(SPD*tapHang+(pad==null?110:pad));
 }
-function rebuildCharts(){
-  /* L1 must cover ≥60s survival gate (SPD*62 world units). */
-  LEVELS.forEach(function(L,i){
-    var m=makeChart(CHART_SRC[L.chartKind],RUN_SEED+i*17,i===0?30:0);
-    L.chart=m.chart;
-    L.len=i===0?Math.max(m.len,Math.round(SPD*62)):m.len;
-  });
+function makeL1Chart(){
+  /* Sparse easy L1 — no rolling rocks, no early kickers/gaps; doubles use fairGap */
+  var g=fairGap(140),x=540,c=[];
+  function add(t,mul){c.push({x:Math.round(x),t:t});x+=g*(mul||1);}
+  add('rockS');add('teach',1.08);add('rockS');add('rockM',1.12);
+  add('double',1.55);add('coyote',1.15);add('rockS');add('stagger',1.55);
+  add('grom',1.25);add('rockM');add('rockS',1.12);add('rockM',1.18);
+  add('coyote',1.15);add('rockS');add('double',1.55);add('rockL',1.25);
+  add('grom',1.3);add('rockM');
+  L1_LEN=Math.round(x+g*0.55);
+  return c;
 }
-/* Per-level resort zone + painted palette (no photo plates). forest = [far,mid,near] conifer tones */
+/* Shared L1 chart — four levels rotate resort backdrops only */
+var L1_LEN=6400;
+var CHART=makeL1Chart();
 var LEVELS=[
-  {id:'L1',name:'First Tracks',tag:'Base Lodge',chartKind:'ridge',zone:'base',
-    sky:['#7aa8cc','#b0cfe6','#e4f0f8'],snow:'#eef3f8',shade:'#8fa8bc',tint:'#d5e2ec',
-    rock:['#5e6a76','#7e8a96','#a4b0bc'],rockRim:'#d7e2ea',
-    far:['#a8c0d2','#c4d6e4'],midSnow:['#d8e6f0','#c0d2e0'],
-    /* lighter than 8753579 dark wall — readable pines, rocks still win */
-    forest:['#4a6a58','#5a7c68','#6a8c78'],near:['#5a7c68','#d6e6f0'],
-    light:[-0.55,-0.72],fog:[196,214,226],pt:'fine',flakes:8},
-  {id:'L2',name:'Wide White',tag:'Mid Mountain',chartKind:'field',zone:'groomer',
-    sky:['#a8c8e8','#d0e4f4','#f2f8fc'],snow:'#fbfcfe',shade:'#c0d4e4',tint:'#eef5fb',
-    rock:['#7a8692','#9aa6b0','#c2ccd4'],rockRim:'#f2f7fb',
-    far:['#c0d4e4','#dde8f0'],midSnow:['#eef6fb','#d4e4f0'],
-    forest:['#628474','#729484','#82a494'],near:['#729484','#eaf3f8'],
-    light:[-0.12,-0.98],fog:[236,244,250],pt:'big',flakes:10},
-  {id:'L3',name:'Glass Run',tag:'Lakeside',chartKind:'lake',zone:'lake',
-    sky:['#2a6eaa','#5a9cc8','#b8dcec'],snow:'#d4eef8',shade:'#5e92b0',tint:'#aed4e6',
-    rock:['#3e5e72','#5e8296','#8eb0c2'],rockRim:'#c4e8f6',
-    far:['#5a8aac','#8eb8d0'],midSnow:['#c8e4f0','#a8cce0'],
-    forest:['#4e7a6e','#5e8a7e','#6e9a8e'],near:['#5e8a7e','#c0dcec'],
-    light:[-0.72,-0.5],fog:[140,190,210],pt:'glint',flakes:8},
-  {id:'L4',name:'Dusk Bowl',tag:'Summit Light',chartKind:'bowl',zone:'bowl',
-    sky:['#5a78a8','#b8a0b0','#e8d8e0'],snow:'#f4f0f6',shade:'#6f87b2',tint:'#cfd6e8',
-    rock:['#6a6578','#8a8496','#b0a8b6'],rockRim:'#f2e4ec',
-    far:['#7a8098','#b8a8b4'],midSnow:['#e8dce8','#c8c0d0'],
-    forest:['#6a6870','#7a7880','#8a8890'],near:['#7a7880','#e0d4e4'],
-    light:[0.35,-0.85],fog:[198,200,220],pt:'ember',flakes:10}
+  {id:'L1',name:'First Tracks',bg:'bg-bluebird.webp',sky:['#5aa0d0','#9ecce8','#e6f3fb']},
+  {id:'L2',name:'Alpenglow Bowl',bg:'bg-alpenglow.webp',sky:['#c45a3a','#e8a060','#f6d5a8']},
+  {id:'L3',name:'Storm Powder',bg:'bg-storm.webp',sky:['#6a7a88','#9aa8b4','#c8d2da']},
+  {id:'L4',name:'Night Park',bg:'bg-night.webp',sky:['#0e1a30','#1a3050','#2a4468']}
 ];
-rebuildCharts();
-var L1_LEN=LEVELS[0].len;
 var levelIdx=0;
 function curLevel(){return LEVELS[levelIdx%LEVELS.length];}
-function curChart(){return curLevel().chart;}
-function curLen(){return curLevel().len||L1_LEN;}
-function levelLook(){
-  var L=curLevel();
-  return{snow:L.snow,shade:L.shade,tint:L.tint,light:L.light,flakes:L.flakes,pt:L.pt,
-    rock:L.rock,rockRim:L.rockRim,fog:L.fog,tag:L.tag,zone:L.zone,
-    far:L.far,midSnow:L.midSnow,forest:L.forest,near:L.near,sky:L.sky};
-}
-
-/* Unlockable boards + rider looks (colorways) — earn by clearing levels / stars */
-var BOARDS=[
-  {id:'stock',name:'Stock',stripe:'#9fd3ff',deck:'#e8eef4',needLvl:0},
-  {id:'ember',name:'Ember',stripe:'#e8772e',deck:'#2a1810',needLvl:1},
-  {id:'ice',name:'Ice Edge',stripe:'#7ec8ff',deck:'#152030',needLvl:2},
-  {id:'gold',name:'Gold Carve',stripe:'#ffd84a',deck:'#2a2410',needLvl:3}
-];
-var LOOKS=[
-  {id:'trail',name:'Trail Tan',jacket:'#c4a06a',needLvl:0},
-  {id:'navy',name:'Night Navy',jacket:'#3a5080',needLvl:1},
-  {id:'flare',name:'Flare Red',jacket:'#c44a3a',needLvl:2},
-  {id:'mint',name:'Mint Run',jacket:'#4a9a78',needStars:3}
-];
-var unlocks={cleared:0,stars:0,board:'stock',look:'trail'};
-try{unlocks=Object.assign(unlocks,JSON.parse(localStorage.getItem('bd9.unlocks')||'{}'));}catch(e){}
-function saveUnlocks(){try{localStorage.setItem('bd9.unlocks',JSON.stringify(unlocks))}catch(e){}}
-function boardUnlocked(b){return unlocks.cleared>=(b.needLvl||0);}
-function lookUnlocked(lk){
-  if(lk.needStars!=null)return unlocks.stars>=lk.needStars;
-  return unlocks.cleared>=(lk.needLvl||0);
-}
-function curBoard(){return BOARDS.find(function(b){return b.id===unlocks.board;})||BOARDS[0];}
-function curLook(){return LOOKS.find(function(l){return l.id===unlocks.look;})||LOOKS[0];}
-function applyEquippedKit(){
-  var b=curBoard(),lk=curLook();
-  KIT.board=b.deck;KIT.boardStripe=b.stripe;KIT.jacket=lk.jacket;
-  KIT.jacketHi=lk.jacket; /* soft match for vector fallback */
-}
-function grantClear(lvlIdx){
-  var next=Math.max(unlocks.cleared,(lvlIdx|0)+1);
-  if(next>unlocks.cleared){unlocks.cleared=next;unlocks.stars=(unlocks.stars||0)+1;saveUnlocks();}
-  else{unlocks.stars=(unlocks.stars||0)+1;saveUnlocks();}
-}
 
 var S,acc=0,last=0,muted=false,menuSheet=null,pb=0,attempts=0,flakes=[];
 try{pb=+(localStorage.getItem('bd9.pb')||0)}catch(e){}
 try{muted=localStorage.getItem('bd9.mute')==='1'}catch(e){}
 try{levelIdx=Math.max(0,Math.min(LEVELS.length-1,+(localStorage.getItem('bd9.lvl')||0)|0))}catch(e){}
 
-function rideX(){return Math.round(W*0.22);} /* fixed 22% from left — ~78% look-ahead */
+function rideX(){return Math.round(Math.max(72,Math.min(W*(isLand()?0.22:0.28),W*(isLand()?0.24:0.30))));}
 function isLand(){return W>H*1.15;}
-/* Portrait: 10% of viewport height (~85 CSS @844). Landscape: 10% of short side, floor ~45 CSS px. */
-function targetRiderCss(){
-  if(isLand())return Math.max(45,RIDER_H_FRAC*Math.min(innerWidth,innerHeight));
-  return RIDER_H_FRAC*innerHeight;
-}
-function worldRiderH(){return targetRiderCss()*H/innerHeight;}
-function riderSc(){return worldRiderH()/RIDER_LOCAL_H;}
+function riderSc(){return (RIDER_H_FRAC*H)/RIDER_LOCAL_H;}
+function worldRiderH(){return RIDER_H_FRAC*H;}
 function menuOpen(){var el=document.getElementById('menu');return el&&el.style.display!=='none';}
-function hexRgb(hex){
-  hex=(hex||'#9ecce8').replace('#','');
-  if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
-  return [parseInt(hex.slice(0,2),16)||158,parseInt(hex.slice(2,4),16)||204,parseInt(hex.slice(4,6),16)||232];
-}
-function rgba(rgb,a){return 'rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+a+')';}
 /* game-units per atlas/CSS px — ride = RIDER_H_FRAC × playfield for every sprite */
 function artSc(){
   var rh=(ART.ok&&ART.atlas&&ART.atlas.frames.ride)?ART.atlas.frames.ride.h:RIDER_ATLAS_H;
@@ -275,298 +148,194 @@ function loadImg(src){
   return new Promise(function(res,rej){var img=new Image();img.onload=function(){res(img);};img.onerror=rej;img.src=src;});
 }
 function bootArt(){
+  /* Atlas only on first load — backdrops lazy-load per level */
   var dir=ART_CFG.dir;
-  Promise.all([
-    fetch(dir+ART_CFG.atlas+'.json').then(function(r){return r.json();}).then(function(meta){
-      return loadImg(dir+meta.image).then(function(img){return {img:img,frames:meta.frames,dpr:meta.dpr||1};});
-    }),
-    loadImg(dir+ART_CFG.rig).catch(function(){return null;}),
-    fetch(dir+ART_CFG.rigMeta).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
-  ]).then(function(pack){
-    var atlas=pack[0],rig=pack[1],rigMeta=pack[2];
-    ART.atlas=atlas;ART.dpr=atlas.dpr||1;
-    ART.rig=rig&&rigMeta?rig:null;ART.rigMeta=rig&&rigMeta?rigMeta:null;
-    ART.ok=!!atlas;
+  fetch(dir+ART_CFG.atlas+'.json').then(function(r){return r.json();}).then(function(meta){
+    return loadImg(dir+meta.image).then(function(img){return {img:img,frames:meta.frames,dpr:meta.dpr||1};});
+  }).then(function(atlas){
+    ART.atlas=atlas;ART.dpr=atlas.dpr||1;ART.ok=true;
     if(atlas.frames.ride)RIDER_ATLAS_H=atlas.frames.ride.h;
     if(S)S.obs=buildObs();
+    ensureBackdrop(curLevel().bg);
+    preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   }).catch(function(err){ART.ok=false;console&&console.warn('BD art fallback',err);});
 }
-/* Plates removed — resort is procedural painted layers (no first-load webp) */
-function ensureBackdrop(){return Promise.resolve(null);}
-function preloadBackdrop(){}
+function ensureBackdrop(file){
+  if(!file||ART.bg[file]||ART.bgLoading[file])return ART.bgLoading[file]||Promise.resolve(ART.bg[file]||null);
+  ART.bgLoading[file]=loadImg(ART_CFG.dir+file).then(function(img){
+    ART.bg[file]=img;delete ART.bgLoading[file];return img;
+  }).catch(function(err){
+    delete ART.bgLoading[file];console&&console.warn('BD backdrop',file,err);return null;
+  });
+  return ART.bgLoading[file];
+}
+function preloadBackdrop(file){
+  if(!file||ART.bg[file]||ART.bgLoading[file])return;
+  /* cheap idle preload of next level backdrop */
+  var run=function(){ensureBackdrop(file);};
+  if(typeof requestIdleCallback==='function')requestIdleCallback(run,{timeout:1200});
+  else setTimeout(run,400);
+}
 function setLevel(i){
   levelIdx=((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length;
   try{localStorage.setItem('bd9.lvl',levelIdx)}catch(e){}
+  ensureBackdrop(curLevel().bg);
+  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
 }
-/* Calm rollers — readable, not violent bob */
+/* Rolling downhill: world rolls + screen-space pitch so the run reads downhill without camera tilt */
 function terr(wx){
-  return 38*(0.55*Math.sin(wx/280+TER[0])+0.30*Math.sin(wx/150+TER[1])+0.15*Math.sin(wx/90+TER[2]))
-    + 8*Math.sin(wx/420);
-}
-function updateCamY(dt){
-  /* Horizontal follow only. Y = heavily smoothed terrain baseline — never rider.y / air. */
-  var target=GROUND+terr(S?S.dist:0)*0.25;
-  var k=Math.min(1,(dt||DT)*1.2);
-  CAM_Y+= (target-CAM_Y)*k;
+  /* Aggressive rollers / dips / pitches — readable at phone size */
+  return 96*(0.50*Math.sin(wx/250+TER[0])+0.32*Math.sin(wx/130+TER[1])+0.18*Math.sin(wx/60+TER[2]))
+    + 22*Math.sin(wx/420) + 12*Math.sin(wx/88);
 }
 function gY(sx){
   var wx=(S?S.dist:0)+(sx-rideX());
-  /* slope relative to smoothed cam baseline — gentle pitch, no jump bob */
-  return CAM_Y+(terr(wx)-terr(S?S.dist:0))*0.55+(sx-rideX())*0.10;
+  return GROUND+terr(wx)+(sx-rideX())*0.28;
 }
 function slopeAt(sx){return Math.atan2(gY(sx+5)-gY(sx-5),10);}
 function ell(x,y,rx,ry,rot){cx.beginPath();cx.ellipse(x,y,rx,ry,rot||0,0,Math.PI*2);}
 function rr(x,y,w,h,r){r=Math.min(r,w/2,h/2);cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
 function cap(x0,y0,x1,y1,r){var dx=x1-x0,dy=y1-y0,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;cx.beginPath();cx.moveTo(x0+nx*r,y0+ny*r);cx.arc(x0,y0,r,Math.atan2(ny,nx),Math.atan2(-ny,-nx),false);cx.lineTo(x1-nx*r,y1-ny*r);cx.arc(x1,y1,r,Math.atan2(-ny,-nx),Math.atan2(ny,nx),false);cx.closePath();}
 
-/* Man1 ride-frame cutout rig — Terrain Park joint pipeline */
+/* —— Rider poses —— */
 function poseFor(){
-  var p=S.p,t=S.t,sl=slopeAt(p.x),swing=Math.sin(t*5.5);
+  var p=S.p,t=S.t;
   if(S.mode==='over'){
     var u=Math.min(1,(S.crashT||0)/0.55);
-    return{crash:1,profile:1,cutout:1,lean:0.2,knee:0.85,arch:0.1,boardRot:0.5+u*Math.PI*2,boardY:-8-u*20,air:true,bodyRot:u*Math.PI*1.4,
-      frontArm:0.3,backArm:-0.5,armLift:0.4};
+    /* Believable tumble: tucked limbs, body rolls as a unit, board flies off */
+    return{
+      crash:1,lean:0.08,knee:0.72,squash:0.9,air:true,
+      bodyRot:u*Math.PI*1.35,
+      lArmX:-14,lArmY:-10+u*6,rArmX:16,rArmY:-8+u*8,
+      boardFly:1,boardRot:0.4+u*Math.PI*2.1,boardOffX:18+u*52,boardOffY:-12-u*38
+    };
   }
   if(!p.on){
-    var rising=p.vy<-60,falling=p.vy>90;
-    var flipping=Math.abs(S.flip||0)>0.45||(S.spinActive&&S.spinDeg>40);
-    return{profile:1,cutout:1,lean:sl*0.25+(rising?-0.2:0.1),
-      knee:rising?0.05:(falling||flipping?0.95:0.55), arch:rising?-0.08:(falling?0.18:0),
-      boardRot:rising?-0.08:(falling?0.1:0.03), boardY:0,air:true,extend:rising?1:0,tuck:falling||flipping?1:0,
-      frontArm:rising?0.15:(flipping?0.7:0.5), backArm:rising?-0.75:(flipping?0.15:-0.65), armLift:rising?0.85:(falling?0.3:0.45)};
+    var tuck=p.vy>80?0.55:0.38;
+    return{lean:-0.06,knee:tuck,squash:1,boardRot:p.vy<-220?-0.12:0.16,boardY:-3,air:true,lArmX:-30,lArmY:-62,rArmX:34,rArmY:-56,armsOut:1};
   }
-  if(S.landT>0){
-    var a=Math.min(1,S.landT/0.2);
-    return{profile:1,cutout:1,lean:sl*0.45+0.18,knee:0.75+0.22*a,arch:0.2+0.15*a,boardRot:sl*0.05,boardY:0,air:false,absorb:1,
-      frontArm:0.12,backArm:-0.35,armLift:0.06};
-  }
-  if(S.nearT>0)return{profile:1,cutout:1,lean:sl*0.5+0.2,knee:0.7,arch:0.08,boardRot:0.04,air:false,frontArm:0.5,backArm:-0.6,armLift:0.3};
+  if(S.landT>0)return{lean:0.12,knee:0.88,squash:0.82,boardRot:0,boardY:1,air:false,lArmX:-12,lArmY:-18,rArmX:16,rArmY:-16};
+  if(S.nearT>0)return{lean:0.18,knee:0.7,squash:1,boardRot:0.04,air:false,lArmX:-22,lArmY:-40,rArmX:32,rArmY:-28};
+  // crouch when approaching hazard
   var crouch=0;
   for(var i=0;i<S.obs.length;i++){var o=S.obs[i],ox=o.x-S.dist+p.x;if(ox>p.x&&ox<p.x+160&&o.k==='rock'){crouch=1;break;}}
-  if(crouch)return{profile:1,cutout:1,lean:sl*0.5+0.2,knee:0.98,arch:0.28,boardRot:0.02,air:false,crouch:1,frontArm:0.05,backArm:-0.28,armLift:0.04};
-  return{profile:1,cutout:1,lean:sl*0.85+0.2+swing*0.05,knee:0.55+Math.sin(t*5.2)*0.06,arch:0.1,boardRot:sl*0.08,boardY:0,air:false,
-    frontArm:0.5+swing*0.25,backArm:-0.55-swing*0.2,armLift:0.28+Math.abs(swing)*0.1};
+  if(crouch)return{lean:0.14,knee:0.78,squash:0.96,boardRot:0,air:false,lArmX:-14,lArmY:-26,rArmX:22,rArmY:-22};
+  return{lean:0.08+Math.sin(t*4)*0.02,knee:0.56+Math.sin(t*5.2)*0.03,squash:1,boardRot:0,air:false,lArmX:-18,lArmY:-34+Math.sin(t*4)*2,rArmX:30,rArmY:-24+Math.sin(t*4.2)*2};
 }
-function rotOffset(dx,dy,rot){return{x:dx*Math.cos(rot)-dy*Math.sin(rot),y:dx*Math.sin(rot)+dy*Math.cos(rot)};}
-function cutoutSc(){return worldRiderH()/((ART.rigMeta&&ART.rigMeta.frameH)||RIDER_ATLAS_H);}
-/* Terrain Park–style Man1 side-profile cutout: each layer once, Franz pivots, rim light */
-function paintRiderCutout(pose,t){
-  var img=ART.rig,meta=ART.rigMeta;if(!img||!meta||!meta.parts)return false;
-  var P=meta.parts,need=RIG_PARTS,i;
-  for(i=0;i<need.length;i++)if(!P[need[i]])return false;
-  RIG_DRAW_COUNTS={};
-  var knee=Math.max(0,Math.min(1.15,pose.knee==null?0.55:pose.knee));
-  /* Rest cutouts already crouch (~0.55). Small deltas keep Franz silhouette readable (TP). */
-  var kDelta=(knee-0.55)*0.55;
-  var hipBend=kDelta*0.45+(pose.arch||0)*0.22;
-  var kneeBend=kDelta*0.7+(pose.arch||0)*0.12;
-  var torsoLean=(pose.lean||0)*0.32-(pose.arch||0)*0.22;
-  var headRot=torsoLean*0.3+(pose.extend?-0.06:0)+(pose.tuck?0.08:0);
-  var armBRot=Math.max(-0.55,Math.min(0.55,(pose.backArm||0)*0.35-(pose.armLift||0)*0.22+torsoLean*0.08));
-  var armFRot=Math.max(-0.55,Math.min(0.55,(pose.frontArm||0)*0.35-(pose.armLift||0)*0.28+torsoLean*0.06));
-  /* Composite layers offscreen (no per-part glow), then one rim blit — reads as one rider */
-  var fw=meta.frameW,fh=meta.frameH;
-  var oc=document.createElement('canvas');oc.width=fw+8;oc.height=fh+8;
-  var ox=oc.getContext('2d');
-  function drawPart(name,x,y,rot){
-    var part=P[name];
-    RIG_DRAW_COUNTS[name]=(RIG_DRAW_COUNTS[name]||0)+1; /* exactly once per layer */
-    ox.save();ox.translate(x+4,y+4);ox.rotate(rot||0);
-    ox.drawImage(img,part.x,part.y,part.w,part.h,-part.pivotX,-part.pivotY,part.w,part.h);
-    ox.restore();
-  }
-  var board=P.board,thighB=P.thighB,shinB=P.shinB,bootB=P.bootB,armB=P.armB,torso=P.torso;
-  var thighF=P.thighF,shinF=P.shinF,bootF=P.bootF,armF=P.armF,head=P.head;
-  drawPart('board',board.restX,board.restY,pose.boardRot||0);
-  drawPart('thighB',thighB.restX,thighB.restY,hipBend*0.85);
-  (function(){
-    var kneeLocal=rotOffset(shinB.restX-thighB.restX,shinB.restY-thighB.restY,hipBend*0.85);
-    var kx=thighB.restX+kneeLocal.x,ky=thighB.restY+kneeLocal.y;
-    drawPart('shinB',kx,ky,hipBend*0.85+kneeBend);
-    var bootLocal=rotOffset(bootB.restX-shinB.restX,bootB.restY-shinB.restY,hipBend*0.85+kneeBend);
-    drawPart('bootB',kx+bootLocal.x,ky+bootLocal.y,hipBend*0.85+kneeBend*0.85);
-  })();
-  drawPart('armB',armB.restX,armB.restY,armBRot);
-  drawPart('torso',torso.restX,torso.restY,torsoLean);
-  (function(){
-    var hipFPos=rotOffset(thighF.restX-torso.restX,thighF.restY-torso.restY,torsoLean);
-    var hfx=torso.restX+hipFPos.x,hfy=torso.restY+hipFPos.y;
-    drawPart('thighF',hfx,hfy,torsoLean+hipBend);
-    var kneeLocal=rotOffset(shinF.restX-thighF.restX,shinF.restY-thighF.restY,torsoLean+hipBend);
-    var kx=hfx+kneeLocal.x,ky=hfy+kneeLocal.y;
-    drawPart('shinF',kx,ky,torsoLean+hipBend+kneeBend);
-    var bootLocal=rotOffset(bootF.restX-shinF.restX,bootF.restY-shinF.restY,torsoLean+hipBend+kneeBend);
-    drawPart('bootF',kx+bootLocal.x,ky+bootLocal.y,torsoLean+hipBend+kneeBend*0.85);
-  })();
-  (function(){
-    var armFPos=rotOffset(armF.restX-torso.restX,armF.restY-torso.restY,torsoLean);
-    drawPart('armF',torso.restX+armFPos.x,torso.restY+armFPos.y,torsoLean+armFRot);
-  })();
-  (function(){
-    var headPos=rotOffset(head.restX-torso.restX,head.restY-torso.restY,torsoLean);
-    drawPart('head',torso.restX+headPos.x,torso.restY+headPos.y,torsoLean+headRot);
-  })();
-  var s=cutoutSc();
-  cx.save();cx.scale(s,s);
-  cx.translate(-fw/2, -fh+(pose.boardY||0));
-  if(pose.bodyRot){cx.translate(fw/2,fh*0.55);cx.rotate(pose.bodyRot);cx.translate(-fw/2,-fh*0.55);}
-  if(pose.air&&!pose.extend)cx.translate(0,Math.sin(t*5)*0.4);
-  /* Light rim / soft halo — separates dark kit from hazed crags */
-  cx.shadowColor='rgba(242,248,255,.85)';cx.shadowBlur=5;cx.shadowOffsetX=-1.6;cx.shadowOffsetY=-1.5;
-  cx.drawImage(oc,-4,-4);
+function paintBoard(pose){
+  var K=KIT;
+  cx.save();
+  if(pose.boardFly){cx.translate(pose.boardOffX||0,pose.boardOffY||0);cx.rotate(pose.boardRot||0);}
+  else{cx.rotate(pose.boardRot||0);cx.translate(0,pose.boardY||0);}
+  cx.fillStyle=K.boardEdge;rr(-36,-5,72,13,6);cx.fill();
+  cx.fillStyle=K.board;rr(-34,-4,68,11,5);cx.fill();
+  cx.fillStyle=K.boardStripe;cx.fillRect(-24,-1.5,48,2.4);
+  if(pose.boardFly){cx.fillStyle=K.boardEdge;cx.fillRect(-30,2,60,2);}
+  cx.restore();
+}
+function paintRiderArt(pose,t){
+  var name='ride';
+  if(pose.crash||S.mode==='over')name='crash';
+  else if(!S.p.on){
+    if(S.holding||(S.p.vy>-80&&S.p.vy<160))name='indy';
+    else name='air';
+  }else if(S.landT>0)name='land';
+  var a=artSize(name);if(!a)return false;
+  cx.save();
+  /* bob only in air — on snow the board stays planted on the surface line */
+  if(pose.air&&name!=='crash')cx.translate(0,Math.sin(t*5)*0.1);
+  /* crash tip in local space — atlas v2 already faces travel (right), no mirror */
+  if(name==='crash')cx.rotate(Math.min(0.35,(S.crashT||0)*0.6));
+  cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-a.w/2,-a.h,a.w,a.h);
   cx.restore();
   return true;
 }
-function paintRiderVec(pose,t){
-  /* Compact vector fallback if rig missing */
-  var K=KIT,rs=riderSc(),sq=pose.squash||1;
-  cx.save();cx.scale(rs,rs);cx.scale(1,sq);
-  cx.fillStyle=K.board;rr(-28,-3,56,7,3);cx.fill();
-  cx.fillStyle=K.pants;rr(-14,-28,12,26,4);cx.fill();rr(2,-28,12,26,4);cx.fill();
-  cx.fillStyle=K.boot;rr(-16,-4,14,6,2);cx.fill();rr(4,-4,14,6,2);cx.fill();
-  cx.fillStyle=K.jacket;rr(-12,-52,26,30,6);cx.fill();
-  cx.fillStyle=K.helmet;cx.beginPath();cx.ellipse(6,-58,9,8,-.1,0,7);cx.fill();
-  cx.fillStyle=K.lens;cx.beginPath();cx.ellipse(11,-58,3,3.5,.1,0,7);cx.fill();
-  cx.restore();
-}
-function paintColorwayAccent(pose){
-  /* Board stripe + soft jacket wash so unlocks read on cutout + vector */
-  var b=curBoard(),lk=curLook();
-  cx.fillStyle=b.stripe;
-  rr(-24,-2.2,48,3.2,1.4);cx.fill();
-  cx.fillStyle=b.deck;
-  rr(-26,0.6,52,2.4,1.2);cx.fill();
-  if(!pose||pose.crash)return;
-  cx.globalAlpha=0.32;cx.fillStyle=lk.jacket;
-  cx.beginPath();cx.ellipse(2,-40,13,17,0.05,0,7);cx.fill();
-  cx.globalAlpha=1;
-}
 function paintRider(pose,t){
-  applyEquippedKit();
-  if(paintRiderCutout(pose,t)){paintColorwayAccent(pose);return;}
-  paintRiderVec(pose,t);
-}
-function rigLayout(pose){
-  var meta=ART.rigMeta,P=meta&&meta.parts,board=P&&P.board,torso=P&&P.torso,head=P&&P.head;
-  var boardLen=board?board.w:56,torsoW=torso?torso.w:28;
-  var standH=meta?meta.frameH:RIDER_ATLAS_H;
-  var headLeads=head&&torso?head.restX>torso.restX:true;
-  return{knee:pose&&pose.knee,lean:pose&&pose.lean,standH:standH,boardLen:boardLen,torsoW:torsoW,
-    boardRatio:boardLen/Math.max(1,torsoW),headLeads:headLeads,headX:head?head.restX:0,hipX:torso?torso.restX:0};
-}
-function riderProfileMetrics(pose){
-  pose=pose||{lean:0.2,knee:0.55,arch:0.1,frontArm:0.45,backArm:-0.5,armLift:0.25,profile:1,cutout:1};
-  var L=rigLayout(pose);
-  var boardOk=L.boardRatio>=1.6&&L.boardRatio<=2.1;
-  return{profile:!!pose.profile,cutout:!!pose.cutout,torsoW:L.torsoW,torsoH:(ART.rigMeta&&ART.rigMeta.parts.torso)?ART.rigMeta.parts.torso.h:34,
-    headX:L.headX,hipX:L.hipX,headLeads:L.headLeads,boardLen:L.boardLen,boardRatio:L.boardRatio,standH:L.standH,
-    ok:!!pose.profile&&L.torsoW<60&&L.headLeads&&boardOk&&!!ART.rig};
-}
-function measureRigPixels(pose){
-  pose=pose||{lean:0.2,knee:0.55,arch:0.1,frontArm:0.45,backArm:-0.5,armLift:0.25,profile:1,cutout:1,boardRot:0.06};
-  var dprM=Math.max(1,Math.min(2,devicePixelRatio||1));
-  var toCss=(scale||1)/dprM;
-  var L=rigLayout(pose);
-  var cssH=L.standH*cutoutSc()*toCss;
-  var boardLenCss=L.boardLen*cutoutSc()*toCss;
-  RIG_DRAW_COUNTS=null;
-  var c=document.createElement('canvas');c.width=Math.round(280*dprM);c.height=Math.round(280*dprM);
-  var g=c.getContext('2d');g.setTransform(dprM,0,0,dprM,0,0);
-  var prev=cx;cx=g;
-  g.clearRect(0,0,280,280);g.save();g.translate(140,230);
-  paintRider(pose,0);g.restore();
-  cx=prev;
-  var counts=RIG_DRAW_COUNTS||{},dup=false,k;
-  for(k in counts)if(counts[k]>1)dup=true;
-  var once=RIG_PARTS.every(function(n){return counts[n]===1;});
-  return{pxH:cssH,cssH:cssH,boardLenCss:boardLenCss,standH:L.standH,boardRatio:L.boardRatio,
-    targetCss:RIDER_H_FRAC*innerHeight,drawCounts:counts,noDup:!dup&&once,
-    ok:cssH>=75&&cssH<=95&&L.boardRatio>=1.6&&L.boardRatio<=2.1&&boardLenCss>=55&&!dup&&once};
+  if(ART.ok&&paintRiderArt(pose,t))return;
+  var K=KIT,lean=pose.lean||0,knee=pose.knee||0.55,sq=pose.squash||1;
+  var rs=riderSc(); /* tuck/grab stay in local units — never upscale poses */
+  cx.save();cx.scale(rs,rs);if(pose.air)cx.translate(0,Math.sin(t*5)*0.15);
+  cx.fillStyle='rgba(14,20,28,.28)';ell(pose.boardFly?8:0,10,30,4);cx.fill();
+  /* Board first — attached normally, or flying free on crash */
+  paintBoard(pose);
+  cx.save();
+  if(pose.bodyRot)cx.rotate(pose.bodyRot);
+  var bootY=-3-knee*14,st=12;
+  if(!pose.boardFly){cx.fillStyle=K.boot;rr(-st-5,bootY,11,8,2);cx.fill();rr(st-6,bootY,11,8,2);cx.fill();}
+  else{cx.fillStyle=K.boot;rr(-st-4,bootY-2,10,7,2);cx.fill();rr(st-5,bootY+2,10,7,2);cx.fill();}
+  var hipY=-30-knee*5;cx.save();cx.translate(lean*12,hipY);cx.scale(1,sq);cx.translate(-lean*12,-hipY);
+  cx.strokeStyle=K.pants;cx.lineWidth=10;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(-st+2,hipY);cx.lineTo(-st+(pose.crash?6:8),bootY+1);cx.stroke();
+  cx.beginPath();cx.moveTo(st-2,hipY);cx.lineTo(st-(pose.crash?2:5),bootY+(pose.crash?3:1));cx.stroke();
+  cx.strokeStyle=K.pantsHi;cx.lineWidth=3;cx.globalAlpha=.45;
+  cx.beginPath();cx.moveTo(-st+2,hipY);cx.lineTo(-st+8,bootY+1);cx.stroke();cx.globalAlpha=1;
+  var top=hipY-28,lx=lean*12;
+  cx.fillStyle=K.jacket;
+  cx.beginPath();cx.moveTo(lx-17,top+5);cx.quadraticCurveTo(lx,top-5,lx+18,top+4);
+  cx.quadraticCurveTo(lx+21,hipY-6,lx+15,hipY+9);cx.quadraticCurveTo(lx,hipY+13,lx-15,hipY+9);
+  cx.quadraticCurveTo(lx-21,hipY-6,lx-17,top+5);cx.closePath();cx.fill();
+  cx.fillStyle=K.jacketShade;cx.globalAlpha=.42;cx.beginPath();cx.moveTo(lx+2,top+7);cx.quadraticCurveTo(lx+15,hipY-2,lx+9,hipY+7);cx.lineTo(lx+2,top+7);cx.fill();cx.globalAlpha=1;
+  cx.fillStyle=K.jacketHi;cx.globalAlpha=.55;ell(lx-6,top+9,7,5,-.3);cx.fill();cx.globalAlpha=1;
+  cx.strokeStyle=K.rim;cx.lineWidth=1.7;cx.beginPath();cx.moveTo(lx-15,top+6);cx.quadraticCurveTo(lx-17,hipY-4,lx-11,hipY+5);cx.stroke();
+  cx.strokeStyle=THEME.accent;cx.lineWidth=2.2;cx.beginPath();cx.moveTo(lx-1,top+7);cx.lineTo(lx+4,hipY+2);cx.stroke();
+  var ax=pose.lArmX||-18,ay=pose.lArmY||-34,bx=pose.rArmX||30,by=pose.rArmY||-24;
+  cx.strokeStyle=K.jacket;cx.lineWidth=7.5;cx.lineCap='round';
+  cx.beginPath();cx.moveTo(lx-13,top+9);cx.lineTo(ax,ay);cx.stroke();
+  cx.beginPath();cx.moveTo(lx+13,top+9);cx.lineTo(bx,by);cx.stroke();
+  cx.fillStyle=K.mitten;ell(ax,ay,5.5,5.5);cx.fill();ell(bx,by,5.5,5.5);cx.fill();
+  var hx=lx+2,hy=top-1;
+  cx.fillStyle=K.skin;ell(hx,hy-9,9,9);cx.fill();
+  cx.fillStyle=K.beanie;rr(hx-11,hy-22,22,11,4);cx.fill();
+  cx.fillStyle=K.beanieRib;cx.fillRect(hx-11,hy-13,22,3.2);
+  cx.fillStyle=K.pom;ell(hx,hy-24,3.5,3.5);cx.fill();
+  cx.fillStyle=K.goggle;rr(hx-10,hy-13,20,7.5,2);cx.fill();
+  cx.fillStyle=K.lens;rr(hx-8,hy-12,16,5.5,1.5);cx.fill();
+  cx.fillStyle=K.lensHi;cx.globalAlpha=.55;cx.fillRect(hx-7,hy-11,6,2.2);cx.globalAlpha=1;
+  cx.restore();cx.restore();cx.restore();
 }
 
-/* Painted rocks: seat on slope normal + bury/AO/shadow. No photo texture. */
-function rockPoly(pts){
-  cx.beginPath();cx.moveTo(pts[0][0],pts[0][1]);
-  for(var i=1;i<pts.length;i++)cx.lineTo(pts[i][0],pts[i][1]);
-  cx.closePath();
-}
-function rockOutline(rw,rh,bury,s){
-  /* 6–9 verts from 7ec0aef v2 chunk + seed jitter. Flat top + taller shoulder; y=0 is slope. */
-  var n=6+(s%4),j=function(k,a,b){return a+hash01(s*17+k)*(b-a);};
-  var y0=-rh*0.34+bury*0.4; /* 7ec0aef body center relative to slope */
-  var pts=[
-    [-rw*j(1,0.42,0.50),y0+rh*j(2,0.28,0.36)],
-    [-rw*j(3,0.46,0.54),y0-rh*j(4,0.0,0.1)],
-    [-rw*j(5,0.22,0.32),y0-rh*j(6,0.22,0.3)], /* inset notch — keeps silhouette chunky */
-    [-rw*j(7,0.06,0.16),y0-rh*j(8,0.34,0.4)],
-    [rw*j(9,0.0,0.1),y0-rh*j(10,0.38,0.44)], /* flat top */
-    [rw*j(11,0.14,0.24),y0-rh*j(12,0.5,0.58)], /* taller shoulder peak */
-    [rw*j(13,0.36,0.46),y0-rh*j(14,0.08,0.18)], /* sharp drop */
-    [rw*j(15,0.42,0.52),y0+rh*j(16,0.1,0.2)],
-    [rw*j(17,0.16,0.28),y0+rh*j(18,0.3,0.38)],
-    [-rw*j(19,0.24,0.36),y0+rh*j(20,0.32,0.4)]
-  ];
-  if(n===6)return [pts[0],pts[2],pts[3],pts[5],pts[7],pts[9]];
-  if(n===7)return [pts[0],pts[1],pts[2],pts[3],pts[5],pts[7],pts[9]];
-  if(n===8)return [pts[0],pts[1],pts[2],pts[3],pts[4],pts[5],pts[7],pts[9]];
-  return [pts[0],pts[1],pts[2],pts[3],pts[4],pts[5],pts[6],pts[7],pts[9]];
-}
+/* —— Boulders: static, half-buried in snow (no roll/spin) — irregular lobes + snow drift —— */
 function drawBoulder(x,gy,w,h,seed){
-  /* High-contrast play rock: dark body + bright white cap + soft ground shadow */
-  var look=levelLook(),sn=look.snow||'#f4f9fd',tn=look.tint||'#e8f0f6';
-  var cols=['#3a4552','#5a6572','#7a8692'],rim='#f7fbff';
-  var cx0=x+w/2,ang=slopeAt(cx0),s=seed|0,L=look.light||[-0.5,-0.7];
-  var hx=L[0],hy=L[1];
-  var aspect=1.45+(s%5)*0.07; /* 1.45–1.73 wider-than-tall */
-  var rw=Math.min(w,h*aspect)*0.96,rh=rw/aspect;
-  var bury=rh*(0.42+(s%3)*0.03); /* bottom 42–48% under slope snow */
-  var body=rockOutline(rw,rh,bury,s),i,cxb=0,cyb=0;
-  for(i=0;i<body.length;i++){cxb+=body[i][0];cyb+=body[i][1];}
-  cxb/=body.length;cyb/=body.length;
-  cx.save();cx.translate(cx0,gy);cx.rotate(ang);
-  if(s%2)cx.scale(-1,1);
-  /* soft ground shadow ahead of silhouette */
-  cx.fillStyle='rgba(20,35,50,.32)';cx.beginPath();cx.ellipse(rw*0.08,3.5,rw*0.5,rh*0.16,0.04,0,7);cx.fill();
-  cx.fillStyle='rgba(20,35,50,.16)';cx.beginPath();cx.ellipse(0,4,rw*0.4,rh*0.1,0,0,7);cx.fill();
-  /* dark angular body */
-  cx.fillStyle=cols[0];rockPoly(body);cx.fill();
-  cx.save();rockPoly(body);cx.clip();
-  cx.fillStyle=cols[1];
-  cx.beginPath();
-  cx.moveTo(cxb-rw*0.22,cyb-rh*0.22);cx.lineTo(cxb+rw*0.06,cyb-rh*0.32);
-  cx.lineTo(cxb+rw*0.28,cyb+rh*0.02);cx.lineTo(cxb+rw*0.02,cyb+rh*0.16);cx.closePath();cx.fill();
-  cx.fillStyle=cols[2];cx.beginPath();cx.ellipse(hx*rw*0.14,cyb+hy*rh*0.1-rh*0.04,rw*0.12,rh*0.09,0,0,7);cx.fill();
-  cx.fillStyle=rim;cx.globalAlpha=.55;cx.beginPath();cx.ellipse(hx*rw*0.16,cyb+hy*rh*0.14-rh*0.1,rw*0.14,rh*0.07,0,0,7);cx.fill();cx.globalAlpha=1;
-  /* snow cap follows top facets (not an oval blob) */
-  var topPts=[];
-  for(i=0;i<body.length;i++)if(body[i][1]< -bury*0.35)topPts.push(body[i]);
-  if(topPts.length>=2){
-    cx.fillStyle='#ffffff';cx.beginPath();
-    cx.moveTo(topPts[0][0],topPts[0][1]+rh*0.01);
-    for(i=1;i<topPts.length;i++)cx.lineTo(topPts[i][0],topPts[i][1]+rh*0.01);
-    for(i=topPts.length-1;i>=0;i--)cx.lineTo(topPts[i][0]*0.82,topPts[i][1]+rh*0.14);
-    cx.closePath();cx.fill();
-    cx.fillStyle=sn;cx.globalAlpha=.9;cx.beginPath();
-    cx.moveTo(topPts[0][0]*0.9,topPts[0][1]+rh*0.05);
-    for(i=1;i<topPts.length;i++)cx.lineTo(topPts[i][0]*0.9,topPts[i][1]+rh*0.05);
-    for(i=topPts.length-1;i>=0;i--)cx.lineTo(topPts[i][0]*0.65,topPts[i][1]+rh*0.16);
-    cx.closePath();cx.fill();cx.globalAlpha=1;
+  var cx0=x+w/2,s=seed|0,bury=Math.max(8,h*ROCK_BURY);
+  /* Soft contact shadow on the run */
+  cx.fillStyle='rgba(25,40,60,.28)';ell(cx0,gy+2,w*0.52,Math.max(4,h*0.09));cx.fill();
+  /* Plant bottom below snow line so the rock reads embedded, not rolling */
+  if(ART.ok){
+    var a=artSize('boulder');
+    if(a){
+      cx.save();cx.translate(cx0,gy+bury);
+      if(s%2)cx.scale(-1,1);
+      /* Draw at object w/h (already irregular via rockSize) — atlas frame reused, no upscale past artSc */
+      cx.drawImage(a.img,a.f.x,a.f.y,a.f.w,a.f.h,-w/2,-h,w,h);
+      cx.restore();
+    }
+  }else{
+    cx.save();cx.translate(cx0,gy+bury*0.15);
+    var g=cx.createRadialGradient(-w*0.22,-h*0.55,2,0,-h*0.2,w*0.78);
+    g.addColorStop(0,'#c4c9d0');g.addColorStop(0.45,'#8a9098');g.addColorStop(1,'#4a5058');
+    cx.fillStyle=g;
+    /* Irregular stacked lobes — not a round cannonball */
+    var ox=((s%5)-2)*w*0.03,oy=((s%3)-1)*h*0.02;
+    ell(-w*0.12+ox,-h*0.42+oy,w*(0.44+(s%3)*0.03),h*(0.40+(s%2)*0.04));cx.fill();
+    ell(w*0.20-ox,-h*0.30,w*(0.34+(s%4)*0.02),h*(0.32+(s%3)*0.03));cx.fill();
+    ell(ox*0.5,-h*0.16,w*0.50,h*0.26);cx.fill();
+    if(s%2){ell(-w*0.28,-h*0.22,w*0.22,h*0.18);cx.fill();}
+    cx.fillStyle='rgba(255,255,255,.16)';ell(-w*0.22,-h*0.52,w*0.16,h*0.12);cx.fill();
+    cx.fillStyle='rgba(30,35,42,.22)';ell(w*0.14,-h*0.20,w*0.14,h*0.12);cx.fill();
+    cx.restore();
   }
-  cx.restore();
-  /* snow drift from slope y=0 — tight lip up both sides (not a separate dome mound) */
-  cx.fillStyle=sn;
+  /* Snow drift / cap over the burial line — rock sits IN the snow */
+  cx.fillStyle='#f4f9fd';
   cx.beginPath();
-  cx.moveTo(-rw*0.52,5);
-  cx.quadraticCurveTo(-rw*0.32,-bury*0.32,-rw*0.04,0);
-  cx.quadraticCurveTo(rw*0.2,-bury*0.26,rw*0.4,1);
-  cx.quadraticCurveTo(rw*0.48,5,rw*0.22,8);
-  cx.lineTo(-rw*0.38,9);cx.closePath();cx.fill();
-  cx.fillStyle=tn;
-  cx.beginPath();
-  cx.moveTo(-rw*0.42,4);
-  cx.quadraticCurveTo(-rw*0.14,-bury*0.2,rw*0.12,1);
-  cx.quadraticCurveTo(rw*0.24,5,-rw*0.06,7);cx.closePath();cx.fill();
-  cx.restore();
+  cx.moveTo(x-w*0.12,gy+2);
+  cx.quadraticCurveTo(cx0-w*0.22,gy-h*0.10,cx0-w*0.05,gy-h*0.14);
+  cx.quadraticCurveTo(cx0+w*0.08,gy-h*0.20,cx0+w*0.18,gy-h*0.10);
+  cx.quadraticCurveTo(cx0+w*0.42,gy-h*0.04,x+w+w*0.12,gy+2);
+  cx.quadraticCurveTo(cx0,gy+5,x-w*0.12,gy+2);
+  cx.closePath();cx.fill();
+  cx.fillStyle='rgba(210,225,238,.7)';
+  ell(cx0-w*0.06,gy-h*0.08,w*0.22,Math.max(3,h*0.05));cx.fill();
+  if(s%2){cx.fillStyle='rgba(255,255,255,.55)';ell(cx0+w*0.1,gy-h*0.16,2.2,1.5);cx.fill();}
 }
 function drawKicker(x,gy,w,h){
   /* no kicker in lite atlas — vector ramp */
@@ -615,58 +384,17 @@ function drawGrom(o,ox,gy){
 }
 
 function drawPine(x,gy,kind){
-  /* painted conifer — same language as mid forest (no flocked atlas pine) */
-  var look=levelLook(),tall=(kind==='tall'||kind===1);
-  var h=(tall?52:36)*worldRiderH()/85;
-  var forest=look.forest||['#2a4a38','#3d6a4e','#5a8a68'];
-  drawConifer(x,gy,h,forest[tall?1:2],look.tint||look.snow||'#eef3f8',1);
-  if(tall)drawConifer(x+h*0.22,gy+2,h*0.62,forest[2],look.snow||'#eef3f8',1);
-}
-/* Feature span check — pines never seat on jump / kicker / boulder / gap */
-function pineBlocked(wx){
-  if(!S||!S.obs)return false;
-  for(var i=0;i<S.obs.length;i++){
-    var o=S.obs[i],pad=48,span=o.w||40;
-    if(o.k==='rock'||o.k==='gap'||o.k==='coyote'||o.k==='grom'){
-      if(wx>=o.x-pad&&wx<=o.x+span+pad)return true;
-    }else if(o.k==='kicker'){
-      /* kicker + landing rock zone */
-      if(wx>=o.x-pad&&wx<=o.x+span*2.2+pad)return true;
-    }
-  }
-  return false;
-}
-/* World 1.0x: screen x = wx − dist + rideX; plant Y from slope (never rider.y) */
-function worldSX(wx){return wx-(S?S.dist:0)+rideX();}
-function slopePlantY(wx,sx){return gY(sx);} /* same surface line the rider uses */
-function playLaneClear(sx,sy){
-  /* Empty snow band ±1 rider-height around the run — keep obstacles readable */
-  var run=gY(sx),pad=worldRiderH();
-  return Math.abs(sy-run)<pad;
-}
-function iterNearBandTrees(fn){
-  /* Medium near trees outside the play lane — FIXED wx, sx = wx − cam + rideX */
-  if(!S)return;
-  var cam=S.dist,rx=rideX(),spacing=170,i0,i1,i,wx,sx,sy,laneL=rx-50,laneR=rx+140,n=0;
-  i0=Math.floor((cam-260)/spacing)-1;i1=Math.ceil((cam+W+260)/spacing)+1;
-  for(i=i0;i<=i1;i++){
-    if(hash01(i*9)<0.28)continue;
-    wx=i*spacing+((Math.abs(i)*97)%70)+36;
-    if(pineBlocked(wx)){wx+=120;if(pineBlocked(wx))continue;}
-    sx=wx-cam+rx;
-    if(sx<-80||sx>W+80)continue;
-    if(sx>laneL&&sx<laneR)continue;
-    sy=slopePlantY(wx,sx)+worldRiderH()*1.15;
-    if(playLaneClear(sx,sy))continue;
-    fn(wx,sx,sy,n++);
-  }
-}
-/* Rigid world-fixed pines: fixed wx, scroll 1:1 with ground, Y = slope plant */
-function drawWorldPines(){
-  iterNearBandTrees(function(wx,sx,sy,n){
-    var look=levelLook(),f=look.forest||['#5a7a68','#6a8c78','#7a9c88'];
-    drawConifer(sx,sy,38+((n*11)%22),f[1]||'#6a8c78',look.tint||'#eef3f8',1);
-  });
+  /* upright full-detail atlas pines — tall/small native only */
+  var nm=(kind==='tall'||kind===1)?'pine_tall':'pine_small';
+  if(ART.ok&&drawArt(nm,x,gy,null))return;
+  var sc=(typeof kind==='number')?kind:(kind==='tall'?2.1:1.55);
+  sc=sc*worldRiderH()/58;
+  cx.save();cx.translate(x,gy);cx.scale(sc,sc);
+  cx.fillStyle='#1f4036';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(18,-24);cx.lineTo(9,-24);cx.lineTo(20,-6);cx.lineTo(-20,-6);cx.lineTo(-9,-24);cx.lineTo(-18,-24);cx.closePath();cx.fill();
+  cx.fillStyle='#2f5a48';cx.beginPath();cx.moveTo(0,-58);cx.lineTo(11,-30);cx.lineTo(-11,-30);cx.closePath();cx.fill();
+  cx.fillStyle='#e8f0f6';cx.globalAlpha=.8;cx.beginPath();cx.moveTo(0,-58);cx.lineTo(7,-42);cx.lineTo(-7,-42);cx.closePath();cx.fill();cx.globalAlpha=1;
+  cx.fillStyle='#5a3a22';cx.fillRect(-2.5,-6,5,9);
+  cx.restore();
 }
 function drawDrift(x,gy,w){
   cx.fillStyle='rgba(255,255,255,.7)';cx.beginPath();cx.moveTo(x,gy);cx.quadraticCurveTo(x+w*0.4,gy-10,x+w,gy-2);cx.lineTo(x+w,gy+4);cx.lineTo(x,gy+3);cx.fill();
@@ -708,9 +436,9 @@ function gromTooClose(x,obs){
   return false;
 }
 function rockSize(B,kind,seed){
-  /* Irregular sizes — S rocks stay narrow so a 0.6s-early jump clears the hitbox */
-  var s=seed|0,mul=kind==='L'?0.88:kind==='M'?0.68:0.50;
-  var ax=0.90+(s%5)*0.025,ay=0.84+(s%4)*0.035;
+  /* Irregular sizes/shapes from one atlas frame — S/M/L + seed aspect jitter */
+  var s=seed|0,mul=kind==='L'?1.06:kind==='M'?1.0:0.86;
+  var ax=0.92+(s%5)*0.03,ay=0.86+(s%4)*0.04;
   return {w:B.w*mul*ax,h:B.h*mul*ay};
 }
 function pushRock(obs,x,B,kind,seed,extra){
@@ -731,7 +459,6 @@ function buildObs(){
   }else{
     B={w:0.90*R,h:0.72*R};C={w:0.75*R,h:0.35*R};K={w:1.4*R,h:0.85*R};gs={w:0.42*R,h:0.55*R};
   }
-  var CHART=curChart();
   for(i=0;i<CHART.length;i++){
     e=CHART[i];x=e.x;
     if(e.t==='rockS'||e.t==='teach')pushRock(obs,x,B,'S',i*3+1);
@@ -760,15 +487,15 @@ function setSeed(n){
   TER[0]=1.1+(RUN_SEED%7)*0.13;
   TER[1]=2.4+((RUN_SEED*3)%11)*0.09;
   TER[2]=0.7+((RUN_SEED*5)%5)*0.11;
-  rebuildCharts();
-  L1_LEN=LEVELS[0].len;
 }
 function reset(keepAttempts){
   if(!keepAttempts){attempts=0;lives=LIVES_MAX;}
+  ensureBackdrop(curLevel().bg);
+  preloadBackdrop(LEVELS[(levelIdx+1)%LEVELS.length].bg);
   var rx=rideX();
-  S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0,titleT:1.5,
+  S={mode:'ready',t:0,dist:0,p:{x:rx,y:gY(rx),vy:0,on:true},obs:buildObs(),parts:[],trail:[],coyote:0,buf:0,holding:false,landT:0,pulse:0,flash:0,nearT:0,pop:null,fail:'',done:false,score:0,cleared:0,crashT:0,
     spinDeg:0,spinTarget:0,spinBoost:false,spinActive:false,trickPts:0,nearPts:0,
-    flip:0,flipHold:false,pressAt:0,pressArmed:false,pressFromGround:false,deathLog:[],noAutoRetry:false};
+    flip:0,flipHold:false,pressAt:0,pressArmed:false,pressFromGround:false};
   /* plant board exactly on surface line after restart */
   S.p.y=gY(S.p.x);S.p.on=true;S.p.vy=0;
   stopMusic();syncUI();
@@ -810,27 +537,15 @@ function spinTap(){
   }
 }
 function holdSet(v){
-  /* No early-release height cut — every jump runs the full JV arc (GD-fixed height).
-     Hold in air still arms backflip after TAP_MS; release never shortens the jump. */
   S.holding=!!v;
-  if(!v)S.flipHold=false;
+  if(!v){
+    S.flipHold=false;
+    if(S.p.vy<0)S.p.vy*=HOLD_CUT;
+  }
 }
 function spawnPuff(x,y,n,col){for(var i=0;i<n;i++)S.parts.push({x:x,y:y,vx:(Math.random()-.5)*140,vy:-50-Math.random()*90,l:.35+Math.random()*0.45,c:col||'#fff'});}
-function logDeath(why,o){
-  /* Death log for harness / Ted playtest — every life loss with cause + local state */
-  if(!S.deathLog)S.deathLog=[];
-  var entry={
-    t:+S.t.toFixed(3),dist:+S.dist.toFixed(1),lives:Math.max(0,lives-1),cause:why||'Wipeout',
-    on:!!S.p.on,y:+S.p.y.toFixed(1),vy:+S.p.vy.toFixed(1),gy:+gY(S.p.x).toFixed(1),
-    flip:+(S.flip||0).toFixed(3),spin:+(S.spinDeg||0).toFixed(1),
-    obs:o?{k:o.k,x:+o.x.toFixed(1),w:+o.w.toFixed(1),h:+o.h.toFixed(1),ox:+(o.x-S.dist).toFixed(1)}:null
-  };
-  S.deathLog.push(entry);
-  return entry;
-}
-function crash(why,o){
+function crash(why){
   if(S.mode!=='play')return;
-  logDeath(why,o);
   S.mode='over';S.fail=why||'Wipeout';S.pop=null;S.flash=-.2;S.crashT=0;clearTricks();S.pressArmed=false;
   /* Pin crash body to slope surface at rider x — never bury under snow */
   S.p.y=gY(S.p.x);S.p.vy=0;S.p.on=true;
@@ -839,19 +554,17 @@ function crash(why,o){
   var sc=score();if(sc>pb){pb=sc;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
   setTimeout(function(){
     if(S.mode!=='over')return;
-    if(S.noAutoRetry)return; /* harness / recorded play owns retry */
-    /* 0 lives = game over — no continue */
     if(lives<=0){
-      attempts++;S.mode='ready';openMenu();syncUI();return;
+      attempts++;reset(false);S.mode='ready';openMenu();syncUI();return;
     }
     attempts++;reset(true);S.mode='play';startMusic();syncUI();
   },260);
 }
-/* Never clip a normal ground jump (landscape HUD math used to zero vy mid-arc). */
+/* World-y floor for board so rider head stays ≤35% from top and clear of HUD */
 function apexFloorY(){
-  var fullJump=GROUND-(JV*JV)/(2*G)-24;
-  var hud=-OY+APEX_HUD_PAD+worldRiderH()*0.15;
-  return Math.min(hud,fullJump); /* more negative = higher sky */
+  var screenTop=-OY;
+  var ceil=Math.max(screenTop+H*APEX_TOP_FRAC,screenTop+APEX_HUD_PAD);
+  return ceil+worldRiderH()*0.9;
 }
 function clampApex(){
   var floor=apexFloorY();
@@ -859,9 +572,10 @@ function clampApex(){
 }
 function landFromAir(){
   var p=S.p;
-  /* Ted: plain jumps ALWAYS land clean. Only rock/animal contact costs a life.
-     Residual flip from the jump hold itself is ignored; intentional flip/spin only. */
-  if(S.flipHold&&S.flip>FLIP_CRASH_MIN){
+  /* Plain tap-jump (no intentional flip/spin) ALWAYS lands clean on any slope.
+     TP-style: residual flip from a brief jump hold is ignored below FLIP_CRASH_MIN.
+     Spin check only when an air-tap spin was started — never spinDeg residue alone. */
+  if(S.flip>FLIP_CRASH_MIN){
     if(!flipLandingClean(S.flip)){crash('Bad flip');return false;}
   }
   if(S.spinActive||S.spinTarget>0){
@@ -882,18 +596,18 @@ function step(dt){
   if(S.mode!=='play'&&S.mode!=='over')return;
   /* Crash: keep body planted on surface at rider x (no post-crash sink) */
   if(S.mode==='over'){S.crashT=(S.crashT||0)+dt;S.p.y=gY(S.p.x);S.p.vy=0;S.p.on=true;return;}
-  S.t+=dt;S.landT=Math.max(0,S.landT-dt);S.pulse=Math.max(0,S.pulse-dt*3);S.nearT=Math.max(0,S.nearT-dt);S.titleT=Math.max(0,(S.titleT||0)-dt);
-  updateCamY(dt);
+  S.t+=dt;S.landT=Math.max(0,S.landT-dt);S.pulse=Math.max(0,S.pulse-dt*3);S.nearT=Math.max(0,S.nearT-dt);
   if(S.flash<0)S.flash=Math.min(0,S.flash+dt);
   if(S.pop){S.pop.l-=dt;if(S.pop.l<=0)S.pop=null;}
   var p=S.p,gy=gY(p.x);
   if(p.on){S.coyote=COYOTE;p.y=gy;p.vy=0;}
   else{
     S.coyote=Math.max(0,S.coyote-dt);
-    /* Full gravity always — jump height is fixed (full JV arc); hold only arms flip */
+    /* Hold-to-flip adds NO lift — full gravity always (height only via HOLD_CUT on early release) */
     p.vy+=G*dt;p.y+=p.vy*dt;
     clampApex();
-    /* Hold-to-flip: only air-started holds (not the jump press). Spins from short air taps. */
+    /* Hold-to-flip: only air-started holds (not the jump press). Ground jump hold = height only.
+       Spins only from short air taps on release. */
     if(S.pressArmed&&!S.pressFromGround&&(performance.now()-S.pressAt)>=TAP_MS)S.flipHold=true;
     if(S.flipHold)S.flip+=FLIP_RATE*dt;
     /* Advance spin toward target (deg) — rate sized so 720 finishes in a normal hang */
@@ -906,7 +620,8 @@ function step(dt){
   }
   S.buf=Math.max(0,S.buf-dt);
   S.dist+=SPD*dt;
-  /* trail array kept for state shape; orange carve stroke removed */
+  if(p.on){S.trail.push({x:p.x-10,y:p.y-1,l:.45});if(S.trail.length>40)S.trail.shift();}
+  for(var ti=S.trail.length-1;ti>=0;ti--){S.trail[ti].l-=dt;S.trail[ti].x-=SPD*dt*.12;if(S.trail[ti].l<=0)S.trail.splice(ti,1);}
   for(var i=S.parts.length-1;i>=0;i--){var q=S.parts[i];q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=420*dt;q.l-=dt;if(q.l<=0)S.parts.splice(i,1);}
   for(i=0;i<S.obs.length;i++){
     var o=S.obs[i];
@@ -914,7 +629,7 @@ function step(dt){
     if(o.k==='grom'&&o.grom==='ride'&&o.vx)o.x+=o.vx*dt;
     var ox=o.x-S.dist+p.x;
     if(o.k==='gap'){
-      if(ox<p.x+8&&ox+o.w>p.x-8&&p.on&&p.y>=gY(p.x)-3){crash('Fell in gap',o);return;}
+      if(ox<p.x+8&&ox+o.w>p.x-8&&p.on&&p.y>=gY(p.x)-3){crash('Fell in gap');return;}
       continue;
     }
     if(o.k==='kicker'){
@@ -928,558 +643,138 @@ function step(dt){
       continue;
     }
     if(o.k==='coyote'){
-      /* Forgiving ~70% art hitbox — jump-over like a low rock */
-      var cw=o.w*0.70,ch=Math.max(8,o.h*0.70),cx0=ox+(o.w-cw)/2,topA=gy-ch;
+      /* Hitbox smaller than art — fair jump-over like a low rock; top at rider ground */
+      var cw=o.w*0.72,ch=Math.max(12,o.h*0.85),cx0=ox+(o.w-cw)/2,topA=gy-ch;
       if(!o.cleared&&ox+o.w<p.x-8){o.cleared=1;S.cleared++;}
-      var cL=p.x-(p.on?6:10),cR=p.x+(p.on?6:10);
-      if(cx0<cR&&cx0+cw>cL&&p.y>topA+2&&(p.y-(p.on?10:38))<gy+2){crash('Coyote',o);return;}
+      var cL=p.x-(p.on?8:12),cR=p.x+(p.on?8:12);
+      if(cx0<cR&&cx0+cw>cL&&p.y>topA+2&&(p.y-(p.on?10:38))<gy+2){crash('Coyote');return;}
       continue;
     }
     if(o.k==='grom'){
-      /* Forgiving ~70% sprite — jump like a small rock; clear = close-call bonus */
-      var gw=o.w*0.70,gh=o.h*0.70,gx0=ox+(o.w-gw)/2,gtop=gy-gh;
+      /* Hitbox ≈80% of sprite — jump like a small rock; clear = close-call bonus */
+      var gw=o.w*GROM_HIT,gh=o.h*GROM_HIT,gx0=ox+(o.w-gw)/2,gtop=gy-gh;
       if(!o.cleared&&ox+o.w<p.x-8){
         o.cleared=1;S.cleared++;S.nearPts=(S.nearPts||0)+GROM_CLEAR_PTS;
         S.nearT=.45;S.pop={txt:'CLOSE!',l:.8};beep(1200,.04,'square',.06);
       }
-      var hitL=p.x-10,hitR=p.x+10,hitB=p.y,hitT=p.y-(p.on?10:38);
+      var hitL=p.x-12,hitR=p.x+12,hitB=p.y,hitT=p.y-(p.on?10:38);
       if(gx0<hitR&&gx0+gw>hitL&&hitB>gtop+2&&hitT<gy+2){
+        /* Air over: pass without contact */
         if(!p.on&&hitB<gtop+18){if(!o.near){o.near=1;S.nearT=.4;}}
-        else{crash('Hit grom',o);return;}
+        else{crash('Hit grom');return;}
       }
       continue;
     }
-    /* Rock: ~70% of art, only protruding height. Plain jump over = clean. */
-    var hitW=o.w*ROCK_HIT,hitH=Math.max(o.h*0.12,(o.h*(1-ROCK_BURY))*ROCK_HIT);
+    // rock — hitbox smaller than art; only protruding height.
+    // Top anchored to rider ground line so slope can't inflate the hitbox mid-pass.
+    // Ground: feet-point (no wide AABB scrape on landing past a buried rock).
+    var hitW=o.w*ROCK_HIT,hitH=Math.max(10,(o.h*(1-ROCK_BURY))*ROCK_HIT);
     var hx0=ox+(o.w-hitW)/2,topR=gy-hitH;
     if(!o.cleared&&ox+o.w<p.x-8){o.cleared=1;S.cleared++;}
-    var hitB=p.y,hitT=p.y-(p.on?8:36);
-    /* Ground: feet point only. Air: tight AABB — no wide scrape on the way down. */
-    var overlap=p.on?(p.x>hx0+2&&p.x<hx0+hitW-2):(hx0<p.x+10&&hx0+hitW>p.x-8);
+    var hitB=p.y,hitT=p.y-(p.on?10:38);
+    var overlap=p.on?(p.x>hx0&&p.x<hx0+hitW):(hx0<p.x+14&&hx0+hitW>p.x-12);
     if(overlap){
-      if(hitB>topR+3&&hitT<gy+2){
+      if(hitB>topR+2&&hitT<gy+2){
         if(o.airGate&&!p.on&&hitB<topR+24){if(!o.near){o.near=1;S.nearT=.4;S.pop={txt:'AIR!',l:.7};beep(880,.05,'square',.05);}}
-        else{crash('Hit rock',o);return;}
+        else{crash('Hit rock');return;}
       }else if(!o.near&&!p.on&&hitB<=topR+4&&hitB>topR-40){o.near=1;S.nearT=.45;S.pop={txt:'+NEAR',l:.75};beep(1200,.04,'square',.06);}
     }
   }
-  if(S.dist>=curLen()){
+  if(S.dist>=L1_LEN){
     S.mode='clear';S.done=true;stopMusic();beep(660,.1,'square',.08);beep(880,.12,'square',.08);
-    grantClear(levelIdx);
     var sc2=score();if(sc2>pb){pb=sc2;try{localStorage.setItem('bd9.pb',pb)}catch(e){}}
   }
 }
 
-/* —— painted in-world resort (world-fixed parallax; Alto / GMA face fill) —— */
+/* —— scene (resort backdrop + sparse FG pines) —— */
 function drawSky(){
-  var look=levelLook(),sky=look.sky||THEME.sky,zone=look.zone||'base';
-  var g=cx.createLinearGradient(0,-OY,0,-OY+H);
-  g.addColorStop(0,sky[0]);g.addColorStop(0.45,sky[1]);g.addColorStop(1,sky[2]);
-  cx.fillStyle=g;cx.fillRect(-20,-OY-20,W+40,H+40);
-  if(zone==='bowl'){
-    cx.fillStyle='rgba(255,170,110,.32)';cx.beginPath();cx.arc(W*0.78,-OY+H*0.14,40,0,7);cx.fill();
-    cx.fillStyle='rgba(255,220,170,.55)';cx.beginPath();cx.arc(W*0.78,-OY+H*0.14,15,0,7);cx.fill();
-  }else if(zone!=='lake'){
-    cx.fillStyle='rgba(255,244,200,.4)';cx.beginPath();cx.arc(W*0.8,-OY+H*0.1,28,0,7);cx.fill();
-    cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(W*0.8,-OY+H*0.1,11,0,7);cx.fill();
-  }
-}
-function ridgeY(wx,base,amp,seed){
-  return base+amp*(0.55*Math.sin(wx*0.0031+seed)+0.28*Math.sin(wx*0.007+seed*1.7)+0.17*Math.sin(wx*0.013+seed*0.6));
-}
-function fillBand(x0,span,yFn,bot,col){
-  cx.fillStyle=col;cx.beginPath();cx.moveTo(x0,bot);
-  for(var x=x0;x<=x0+span;x+=12)cx.lineTo(x,yFn(x));
-  cx.lineTo(x0+span,bot);cx.closePath();cx.fill();
-}
-function faceTop(){return -OY+H*(isLand()?0.22:0.26);} /* ridge leaves a sky band above */
-function hash01(n){var x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x);}
-function wrapView(base,scroll,period){
-  var x=((base-scroll)%period+period)%period;if(x>period*0.85)x-=period;return x;
-}
-/* Soft painted conifer — asymmetric boughs + snow (matches Paint 1 rocks) */
-function drawConifer(x,y,h,body,snow,dense){
-  if(h<3.5)return;
-  var w=h*0.38,skew=(hash01(x*0.17+y*0.09)-0.5)*w*0.35;
-  cx.fillStyle='#4a3a2a';cx.fillRect(x-h*0.04,y-h*0.12,h*0.08,h*0.14);
-  cx.fillStyle=body;
-  cx.beginPath();cx.moveTo(x+skew*0.2,y-h);cx.lineTo(x+w+skew,y-h*0.38);cx.lineTo(x+w*0.28,y-h*0.38);
-  cx.lineTo(x+w*1.1+skew*0.5,y);cx.lineTo(x-w*1.05+skew*0.3,y);cx.lineTo(x-w*0.3,y-h*0.38);cx.lineTo(x-w+skew,y-h*0.38);cx.closePath();cx.fill();
-  if(dense!==0){
-    cx.fillStyle=snow;cx.globalAlpha=0.48;
-    cx.beginPath();cx.moveTo(x+skew*0.2,y-h);cx.lineTo(x+w*0.4+skew*0.3,y-h*0.5);cx.lineTo(x-w*0.35+skew*0.2,y-h*0.5);cx.closePath();cx.fill();
-    if(h>10){cx.beginPath();cx.moveTo(x,y-h*0.55);cx.lineTo(x+w*0.75+skew*0.2,y-h*0.16);cx.lineTo(x-w*0.7+skew*0.2,y-h*0.16);cx.closePath();cx.fill();}
-    cx.globalAlpha=1;
-  }
-}
-function drawChairSeat(x,y,sc,col,rider){
-  sc=sc||1;var w=9*sc,h=5.2*sc;
-  cx.strokeStyle=col;cx.lineWidth=Math.max(1.1,1.5*sc);
-  cx.beginPath();cx.moveTo(x,y-h*1.5);cx.lineTo(x,y);cx.stroke();
-  cx.fillStyle=col;cx.fillRect(x-w*0.55,y,w,h*0.55);cx.fillRect(x-w*0.48,y+h*0.55,w*0.3,h*0.6);cx.fillRect(x+w*0.12,y+h*0.55,w*0.3,h*0.6);
-  if(rider){cx.fillStyle=rider;cx.beginPath();cx.arc(x,y+h*0.12,2*sc,0,7);cx.fill();cx.fillRect(x-1.4*sc,y+h*0.12,2.8*sc,3.2*sc);}
-}
-function drawLodge(x,y,sc,look){
-  sc=sc||1;var bw=74*sc,bh=30*sc,warm=look.zone==='bowl';
-  /* deck + rail */
-  cx.fillStyle='rgba(100,78,55,.4)';cx.fillRect(x-6*sc,y+bh*0.58,bw+22*sc,8*sc);
-  cx.strokeStyle='rgba(140,110,75,.55)';cx.lineWidth=1.2;cx.beginPath();cx.moveTo(x-4*sc,y+bh*0.52);cx.lineTo(x+bw+12*sc,y+bh*0.52);cx.stroke();
-  for(var d=0;d<6;d++){cx.beginPath();cx.moveTo(x+d*16*sc,y+bh*0.52);cx.lineTo(x+d*16*sc,y+bh*0.58+8*sc);cx.stroke();}
-  /* body + roof */
-  cx.fillStyle='#7a654c';cx.fillRect(x,y,bw,bh);
-  cx.fillStyle='#d2b896';
-  cx.beginPath();cx.moveTo(x-7*sc,y);cx.lineTo(x+bw*0.5,y-20*sc);cx.lineTo(x+bw+7*sc,y);cx.closePath();cx.fill();
-  cx.fillStyle='#5e4c3c';cx.fillRect(x+bw*0.7,y+3*sc,bw*0.42,bh*0.9);
-  cx.fillStyle='#c4a888';cx.beginPath();cx.moveTo(x+bw*0.66,y+3*sc);cx.lineTo(x+bw*0.9,y-10*sc);cx.lineTo(x+bw+10*sc,y+3*sc);cx.closePath();cx.fill();
-  /* chimney */
-  cx.fillStyle='#6a5a50';cx.fillRect(x+bw*0.18,y-26*sc,6*sc,12*sc);
-  /* windows + door */
-  cx.fillStyle=warm?'rgba(255,200,110,.95)':'rgba(170,215,235,.85)';
-  for(var w=0;w<4;w++){cx.fillRect(x+8*sc+w*14*sc,y+7*sc,9*sc,10*sc);if(warm){cx.fillStyle='rgba(255,230,160,.35)';cx.beginPath();cx.arc(x+12*sc+w*14*sc,y+12*sc,7*sc,0,7);cx.fill();cx.fillStyle='rgba(255,200,110,.95)';}}
-  cx.fillRect(x+bw*0.78,y+9*sc,8*sc,9*sc);
-  cx.fillStyle='#4a3428';cx.fillRect(x+bw*0.4,y+bh*0.32,10*sc,bh*0.68);
-}
-function drawLiftTerminal(x,y,sc){
-  sc=sc||1;
-  cx.fillStyle='#7a8490';cx.fillRect(x,y,36*sc,16*sc);
-  cx.fillStyle='#c8d0d8';cx.beginPath();cx.moveTo(x-3*sc,y);cx.lineTo(x+18*sc,y-10*sc);cx.lineTo(x+39*sc,y);cx.closePath();cx.fill();
-  cx.fillStyle='#5a6570';cx.fillRect(x+14*sc,y+4*sc,8*sc,12*sc);
-  cx.strokeStyle='rgba(50,60,70,.5)';cx.lineWidth=1.5;cx.beginPath();cx.moveTo(x+18*sc,y);cx.lineTo(x+18*sc,y-22*sc);cx.stroke();
-  cx.fillStyle='#9aa4b0';cx.fillRect(x+10*sc,y-24*sc,16*sc,4*sc);
-}
-function drawPeopleDots(x,y,n,seed){
-  for(var i=0;i<n;i++){
-    var px=x+hash01(seed+i)*50-8,py=y+hash01(seed+i*3)*8;
-    cx.fillStyle=i%3===0?'#c4a06a':(i%3===1?'#3a5a80':'#e8eef4');
-    cx.beginPath();cx.arc(px,py,1.6,0,7);cx.fill();
-    cx.fillRect(px-1,py,2,3.2);
-  }
-}
-function drawResortFar(dist,look){
-  /* Far ridge ONLY at ≤0.04x — silhouette + tiny texture, NO trees */
-  var scroll=(dist*FAR_PAR)%2800,x0=-scroll-100,cols=look.far||['#a8c0d2','#c4d6e4'],zone=look.zone;
-  var top=faceTop()-(zone==='bowl'?(isLand()?6:10):(isLand()?22:34));
-  var amp=zone==='bowl'?16:30,bot=GROUND-36,i,x,y;
-  fillBand(x0,W+3000,function(x){return ridgeY(x+scroll,top,amp,1.1);},bot,cols[0]);
-  fillBand(x0,W+3000,function(x){return ridgeY(x+scroll,top+14,amp*0.6,2.3);},bot,cols[1]);
-  var sh=cx.createLinearGradient(0,top,0,bot);
-  sh.addColorStop(0,'rgba(255,255,255,.06)');sh.addColorStop(0.55,'rgba(40,70,100,.05)');sh.addColorStop(1,'rgba(40,70,100,0)');
-  cx.fillStyle=sh;cx.fillRect(x0,top-12,W+3000,bot-top+24);
-  /* tiny ridge silhouette texture (not trees) */
-  cx.fillStyle='rgba(40,60,80,.14)';
-  for(i=0;i<90;i++){
-    x=x0+40+i*34+hash01(i*3)*12;
-    y=ridgeY(x+scroll,top+8,amp*0.5,1.7)+hash01(i)*10;
-    cx.fillRect(x,y,1.4+hash01(i*2)*2.2,1.2+hash01(i*5)*2);
-  }
-}
-/* Uphill terrain behind the run — 1.0x. t=0 near run, t=1 toward ridge crest. */
-function uphillPlantY(wx,sx,t){
-  var runY=slopePlantY(wx,sx)-4;
-  var crestY=faceTop()+(isLand()?16:24)+terr(wx)*0.12;
-  if(t<0)t=0;else if(t>1)t=1;
-  return runY+(crestY-runY)*t;
-}
-function downhillPlantY(wx,sx,t){
-  var runY=slopePlantY(wx,sx)+6;
-  var deep=isLand()?56:110;
-  if(t<0)t=0;else if(t>1)t=1;
-  return runY+deep*(0.12+0.75*t);
-}
-function inGladeWorld(wx,lane,glades){
-  var g,dx,dy;
-  for(g=0;g<glades.length;g++){
-    dx=wx-glades[g][0];dy=lane-glades[g][1];
-    if(dx*dx/(glades[g][2]*glades[g][2])+dy*dy/(glades[g][3]*glades[g][3])<1)return true;
-  }
-  return false;
-}
-/* Medium-density clustered pines at 1.0x.
-   CRITICAL: every tree uses a FIXED world x (index*step + hash), never wx=cam+offset.
-   Screen x is always sx = wx − cam + rideX so scenery scrolls with rocks. */
-function iterWorldForestTrees(fn){
-  if(!S)return;
-  var look=levelLook(),zone=look.zone,cam=S.dist,rx=rideX();
-  var forest=look.forest||['#5a7a68','#6a8c78','#7a9c88'],snow=look.tint||look.snow||'#eef3f8';
-  var i,wx,lane,sx,sy,h,tone,c,cx0,cy0,nT,k,ang,rad,row,col,stepX,stepY,dStep;
-  var glades=[],gi,nG=5;
-  /* glades are FIXED world ellipses (not cam-relative) so openings scroll */
-  for(gi=0;gi<nG;gi++){
-    glades.push([
-      180+gi*920+hash01(gi*11+zone.length)*220,
-      0.28+hash01(gi*19)*0.4,
-      70+hash01(gi*3)*50,
-      0.09+hash01(gi*7)*0.1
-    ]);
-  }
-  /* uphill clumps — fixed world centers */
-  var clumpStep=zone==='lake'?140:88;
-  for(c=Math.floor((cam-280)/clumpStep)-1;c<=Math.ceil((cam+W+280)/clumpStep)+1;c++){
-    if(hash01(c*3.7+7)<0.18)continue;
-    cx0=c*clumpStep+hash01(c*5.1)*36;
-    cy0=0.22+hash01(c*9.3)*0.62;
-    if(inGladeWorld(cx0,cy0,glades))continue;
-    if(zone==='lake'&&cy0>0.42)continue;
-    nT=5+((hash01(c*2.2)*6)|0); /* medium cluster, not a wall */
-    for(k=0;k<nT;k++){
-      ang=hash01(c*11+k*3)*6.28;rad=10+hash01(c+k*7)*22;
-      wx=cx0+Math.cos(ang)*rad;lane=cy0+Math.sin(ang)*0.06;
-      if(lane<0.12||lane>0.96)continue;
-      if(inGladeWorld(wx,lane,glades))continue;
-      sx=wx-cam+rx;if(sx<-90||sx>W+90)continue;
-      sy=uphillPlantY(wx,sx,lane);
-      if(playLaneClear(sx,sy))continue;
-      tone=forest[hash01(c+k*2)<0.33?0:hash01(c+k)<0.7?1:2];
-      h=32+hash01(c*4+k)*28;
-      fn({wx:wx,sx:sx,sy:sy,h:h,tone:tone,snow:snow,band:'uphill',kind:'tree'});
-    }
-  }
-  /* understory filler — FIXED col indices (never cam+col*step) */
-  stepX=47;stepY=0.12;
-  for(row=0;row<Math.ceil(0.85/stepY);row++){
-    for(col=Math.floor((cam-220)/stepX)-1;col<=Math.ceil((cam+W+260)/stepX)+1;col++){
-      if(hash01(row*19.1+col*7.3)<0.55)continue; /* keep gaps — not a speck wall */
-      wx=col*stepX+hash01(col*3+row)*12+(row%2?8:0);
-      lane=0.18+row*stepY+hash01(row*5+col)*0.03;
-      if(lane>0.92)continue;
-      if(zone==='lake'&&lane>0.4)continue;
-      if(inGladeWorld(wx,lane,glades))continue;
-      sx=wx-cam+rx;if(sx<-90||sx>W+90)continue;
-      sy=uphillPlantY(wx,sx,lane);
-      if(playLaneClear(sx,sy))continue;
-      tone=forest[hash01(row+col)<0.4?0:hash01(row*col+1)<0.7?1:2];
-      h=24+hash01(row*11+col)*20;
-      fn({wx:wx,sx:sx,sy:sy,h:h,tone:tone,snow:snow,band:'uphill',kind:'tree',lite:1});
-    }
-  }
-  /* crest treeline — fixed world x */
-  for(i=Math.floor((cam-220)/39)-1;i<=Math.ceil((cam+W+260)/39)+1;i++){
-    if(hash01(i*41+zone.length)<0.3)continue;
-    wx=i*39+hash01(i*9)*22;
-    lane=0.78+hash01(i*17)*0.16;
-    if(zone==='lake')lane=0.3+hash01(i)*0.12;
-    if(inGladeWorld(wx,lane,glades))continue;
-    sx=wx-cam+rx;if(sx<-90||sx>W+90)continue;
-    sy=uphillPlantY(wx,sx,lane);
-    if(playLaneClear(sx,sy))continue;
-    fn({wx:wx,sx:sx,sy:sy,h:28+hash01(i)*22,tone:forest[0],snow:snow,band:'uphill',kind:'tree'});
-  }
-  /* downhill clumps — world-indexed */
-  dStep=zone==='lake'?150:110;
-  for(i=Math.floor((cam-160)/dStep)-1;i<=Math.ceil((cam+W+160)/dStep)+1;i++){
-    if(hash01(i*13+3)<0.22)continue;
-    wx=i*dStep+((Math.abs(i)*29)%40)+30;
-    sx=wx-cam+rx;if(sx<-70||sx>W+70)continue;
-    if(sx>rx-60&&sx<rx+150)continue;
-    lane=0.25+hash01(i*5)*0.55;
-    sy=downhillPlantY(wx,sx,lane);
-    if(playLaneClear(sx,sy))continue;
-    h=36+hash01(i*3)*24;
-    fn({wx:wx,sx:sx,sy:sy,h:h,tone:forest[Math.abs(i)%3],snow:snow,band:'downhill',kind:'tree'});
-    if(hash01(i*7)>0.45)fn({wx:wx+14,sx:sx+14,sy:sy+4,h:h*0.65,tone:forest[(Math.abs(i)+1)%3],snow:snow,band:'downhill',kind:'tree'});
-  }
-}
-function iterWorldLandmarks(fn){
-  if(!S)return;
-  var look=levelLook(),zone=look.zone,cam=S.dist,rx=rideX();
-  iterWorldForestTrees(fn);
-  iterNearBandTrees(function(wx,sx,sy){
-    fn({wx:wx,sx:sx,sy:sy,band:'run',kind:'tree'});
-  });
-  /* tiled lift towers — FIXED world x repeating along the run */
-  if(zone==='groomer'||zone==='base'||zone==='bowl'){
-    var liftSpan=900,tw,seg,twx,tsx,foot,seg0,seg1;
-    seg0=Math.floor((cam-200)/liftSpan)-1;seg1=Math.ceil((cam+W+200)/liftSpan)+1;
-    for(seg=seg0;seg<=seg1;seg++){
-      for(tw=0;tw<6;tw++){
-        twx=seg*liftSpan+tw*(liftSpan/5)+((zone==='bowl')?80:40);
-        tsx=twx-cam+rx;
-        foot=uphillPlantY(twx,tsx,0.35);
-        fn({wx:twx,sx:tsx,sy:foot,band:'uphill',kind:'lift'});
-      }
-    }
-  }
-  /* lodges / huts — FIXED world positions tiled so they appear during a long run */
-  if(zone==='base'||zone==='groomer'){
-    var lodgeStep=1200,li,lodgeWx,lsx;
-    for(li=Math.floor((cam-200)/lodgeStep)-1;li<=Math.ceil((cam+W+200)/lodgeStep)+1;li++){
-      lodgeWx=li*lodgeStep+280;
-      lsx=lodgeWx-cam+rx;
-      fn({wx:lodgeWx,sx:lsx,sy:uphillPlantY(lodgeWx,lsx,0.2),band:'uphill',kind:'lodge'});
-    }
-  }
-  if(zone==='bowl'){
-    var hutStep=1100,hi,hutWx,hx;
-    for(hi=Math.floor((cam-200)/hutStep)-1;hi<=Math.ceil((cam+W+200)/hutStep)+1;hi++){
-      hutWx=hi*hutStep+620;
-      hx=hutWx-cam+rx;
-      fn({wx:hutWx,sx:hx,sy:uphillPlantY(hutWx,hx,0.55),band:'uphill',kind:'lodge'});
-    }
-  }
-  /* fence posts */
-  var fStep=72,fi,fxw;
-  for(fi=Math.floor((cam-80)/fStep)-1;fi<=Math.ceil((cam+W+80)/fStep)+1;fi++){
-    fxw=fi*fStep+14;fn({wx:fxw,sx:fxw-cam+rx,sy:slopePlantY(fxw,fxw-cam+rx),band:'run',kind:'fence'});
-  }
-}
-function drawWorldUphillFace(look){
-  if(!S)return;
-  var cam=S.dist,rx=rideX(),snow=look.snow||'#eef3f8',ms=look.midSnow||[snow,'#c0d2e0'];
-  var forest=look.forest||['#3a5a48','#4e735c','#6a8f74'],zone=look.zone;
-  var sx,wx,crest,runY;
-  /* 1.0x snow face from crest to run — ground the forest stands on */
-  cx.beginPath();
-  for(sx=-60;sx<=W+60;sx+=10){
-    wx=sx+cam-rx;crest=uphillPlantY(wx,sx,1.05);
-    if(sx===-60)cx.moveTo(sx,crest);else cx.lineTo(sx,crest);
-  }
-  for(sx=W+60;sx>=-60;sx-=10){
-    wx=sx+cam-rx;cx.lineTo(sx,slopePlantY(wx,sx)+2);
-  }
-  cx.closePath();
-  var face=cx.createLinearGradient(0,faceTop(),0,GROUND);
-  face.addColorStop(0,ms[1]||snow);face.addColorStop(0.55,ms[0]||snow);face.addColorStop(1,snow);
-  cx.fillStyle=face;cx.fill();
-  /* no dense canopy wash — keep the uphill face calm so rocks stay readable */
-  if(zone==='bowl'){
-    var glow=cx.createLinearGradient(0,faceTop(),0,GROUND);
-    glow.addColorStop(0,'rgba(255,200,160,.05)');glow.addColorStop(1,'rgba(180,190,220,.02)');
-    cx.fillStyle=glow;cx.fillRect(-60,faceTop(),W+120,GROUND-faceTop());
-  }
-}
-function drawWorldLake(look){
-  if(!S||look.zone!=='lake')return;
-  var cam=S.dist,rx=rideX(),forest=look.forest||['#1e4034','#2f5e48','#457a60'];
-  var lakeWx0=Math.floor((cam-100)/860)*860-40,ox,lw=860,i;
-  function paint(owx){
-    ox=owx-cam+rx;
-    var top=uphillPlantY(owx+300,ox+300,0.48);
-    var bot=uphillPlantY(owx+300,ox+300,0.92);
-    var lg=cx.createLinearGradient(0,top,0,bot);
-    lg.addColorStop(0,'#b9d8e8');lg.addColorStop(0.4,'#9ecce0');lg.addColorStop(1,'#6a9eb8');
-    cx.fillStyle=lg;
-    cx.beginPath();
-    cx.moveTo(ox,bot);
-    cx.bezierCurveTo(ox+70,bot-4,ox+160,top+16,ox+300,top+2);
-    cx.bezierCurveTo(ox+460,top-12,ox+600,top+10,ox+740,top+20);
-    cx.bezierCurveTo(ox+800,top+28,ox+840,bot-6,ox+lw,bot);
-    cx.bezierCurveTo(ox+560,bot+10,ox+240,bot+8,ox,bot);
-    cx.closePath();cx.fill();
-    for(i=0;i<10;i++){
-      if(hash01(i+owx*0.01)<0.25)continue;
-      var twx=owx+50+i*72,tsx=twx-cam+rx,tsy=uphillPlantY(twx,tsx,0.46);
-      drawConifer(tsx,tsy,16+hash01(i*5)*12,forest[i%3],look.tint||look.snow,1);
-    }
-  }
-  paint(lakeWx0);paint(lakeWx0+860);
-}
-function drawWorldLift(look){
-  if(!S)return;
-  var zone=look.zone,cam=S.dist,rx=rideX(),t=S.t||0;
-  if(zone!=='groomer'&&zone!=='base'&&zone!=='bowl')return;
-  var liftSpan=900,seg,seg0,seg1,tw,twx,tsx,foot,cableY0,cableY1,lx0,lx1,ci,csx,cspan,phase,base;
-  seg0=Math.floor((cam-200)/liftSpan)-1;seg1=Math.ceil((cam+W+200)/liftSpan)+1;
-  cx.globalAlpha=0.88; /* readable lift — still lighter than rocks */
-  for(seg=seg0;seg<=seg1;seg++){
-    base=seg*liftSpan+((zone==='bowl')?80:40);
-    cableY0=uphillPlantY(base,base-cam+rx,0.38)-4;
-    cableY1=uphillPlantY(base+liftSpan,base+liftSpan-cam+rx,0.22)-4;
-    lx0=base-cam+rx;lx1=base+liftSpan-cam+rx;
-    cx.strokeStyle='rgba(60,75,90,.55)';cx.lineWidth=1.6;
-    cx.beginPath();cx.moveTo(lx0,cableY0);cx.lineTo(lx1,cableY1);cx.stroke();
-    for(tw=0;tw<6;tw++){
-      twx=base+tw*(liftSpan/5);tsx=twx-cam+rx;
-      if(tsx<-40||tsx>W+40)continue;
-      foot=uphillPlantY(twx,tsx,0.35);
-      var cy=cableY0+(cableY1-cableY0)*(tw/5);
-      cx.fillStyle='#8a96a4';cx.fillRect(tsx-2,cy,4,Math.max(8,foot-cy+4));
-      cx.fillStyle='#a8b4c0';cx.fillRect(tsx-7,cy-2,14,3);
-    }
-    cspan=100;phase=(t*18)%cspan;
-    for(ci=0;ci<10;ci++){
-      csx=lx0+ci*cspan+phase;
-      if(csx<lx0-20||csx>lx1+20)continue;
-      var u=(csx-lx0)/Math.max(1,lx1-lx0);
-      drawChairSeat(csx,cableY0+(cableY1-cableY0)*u+10,0.95,zone==='bowl'?'#c4a070':'#6a7585',null);
-    }
-  }
-  cx.globalAlpha=1;
-}
-function drawWorldProps(look){
-  if(!S)return;
-  var zone=look.zone,cam=S.dist,rx=rideX(),forest=look.forest||['#5a7a68','#6a8c78','#7a9c88'],snow=look.snow||'#eef3f8';
-  var fi,fxw,fx,mi,mx,sy;
-  /* fence + gate signs on the run edge — 1.0x FIXED wx */
-  if(zone!=='lake'){
-    cx.strokeStyle='rgba(120,90,60,.55)';cx.lineWidth=1.3;
-    for(fi=Math.floor((cam-80)/72)-1;fi<=Math.ceil((cam+W+80)/72)+1;fi++){
-      fxw=fi*72+14;fx=fxw-cam+rx;if(fx<-20||fx>W+20)continue;
-      sy=slopePlantY(fxw,fx)+2;
-      cx.beginPath();cx.moveTo(fx,sy);cx.lineTo(fx,sy+14);cx.stroke();
-      if(fi%2===0){cx.beginPath();cx.moveTo(fx,sy+5);cx.lineTo(fx+72,sy+5);cx.stroke();}
-    }
-    for(mi=Math.floor((cam-100)/170)-1;mi<=Math.ceil((cam+W+100)/170)+1;mi++){
-      mx=mi*170+(zone==='base'?40:60);fx=mx-cam+rx;if(fx<-10||fx>W+10)continue;
-      sy=slopePlantY(mx,fx)-6;
-      cx.fillStyle=mi%2?'#e8772e':'#2bd17e';cx.fillRect(fx,sy,4,16);
-      cx.fillStyle='#e8eef4';cx.fillRect(fx-1,sy-2,6,3);
-    }
-  }
-  if(zone==='base'||zone==='groomer'){
-    var lodgeStep=1200,li,lodgeWx,lsx;
-    for(li=Math.floor((cam-200)/lodgeStep)-1;li<=Math.ceil((cam+W+200)/lodgeStep)+1;li++){
-      lodgeWx=li*lodgeStep+280;lsx=lodgeWx-cam+rx;
-      if(lsx<-100||lsx>W+100)continue;
-      sy=uphillPlantY(lodgeWx,lsx,0.18);
-      cx.globalAlpha=0.9;
-      drawLodge(lsx,sy-40,0.95,look);
-      drawLiftTerminal(lsx+70,sy-30,0.85);
-      drawPeopleDots(lsx+10,sy+8,4,li*9);
-      cx.globalAlpha=1;
-    }
-  }
-  if(zone==='bowl'){
-    var hutStep=1100,hi,hutWx,hx,li2;
-    for(hi=Math.floor((cam-200)/hutStep)-1;hi<=Math.ceil((cam+W+200)/hutStep)+1;hi++){
-      hutWx=hi*hutStep+620;hx=hutWx-cam+rx;
-      if(hx<-80||hx>W+80)continue;
-      sy=uphillPlantY(hutWx,hx,0.55);
-      cx.globalAlpha=0.78;
-      drawLodge(hx,sy-24,0.65,look);
-      cx.fillStyle='rgba(255,200,120,.7)';
-      for(li2=0;li2<5;li2++){cx.beginPath();cx.arc(hx-10+li2*20,sy-8+hash01(li2)*4,2.4,0,7);cx.fill();}
-      cx.globalAlpha=1;
-    }
-  }
-}
-function drawWorldForest(look){
-  /* full opacity pines — lighter palette already keeps rocks readable */
-  iterWorldForestTrees(function(t){
-    drawConifer(t.sx,t.sy,t.h,t.tone,t.snow,t.lite?0:1);
-  });
-}
-function drawJumpTicks(){
-  /* Subtle ground tick / soft shadow ahead of each jump takeoff */
-  if(!S||!S.obs)return;
-  var rx=rideX(),i,o,ox,gy,lead;
-  for(i=0;i<S.obs.length;i++){
-    o=S.obs[i];
-    if(o.k!=='rock'&&o.k!=='kicker'&&o.k!=='gap'&&o.k!=='coyote'&&o.k!=='grom')continue;
-    ox=o.x-S.dist+rx;
-    if(ox<-40||ox>W+40)continue;
-    gy=gY(ox);
-    lead=ox-28;
-    cx.fillStyle='rgba(30,50,70,.18)';
-    cx.beginPath();cx.ellipse(ox+o.w*0.35,gy+3,Math.max(10,o.w*0.45),5,0,0,7);cx.fill();
-    cx.strokeStyle='rgba(20,40,60,.35)';cx.lineWidth=1.5;
-    cx.beginPath();cx.moveTo(lead,gy-2);cx.lineTo(lead+10,gy-2);cx.stroke();
-    cx.fillStyle='rgba(255,255,255,.55)';cx.fillRect(lead+1,gy-4,3,3);
-  }
-}
-/* Dress downhill — drifts + fence already partly in props; keep drifts 1.0x */
-function drawSlopeDressing(){
-  /* Corduroy + drifts at FIXED wx — must scroll 1:1 with rocks (sx = wx − cam + rideX) */
-  if(!S)return;
-  var cam=S.dist,i,wx,sx,y,rx=rideX(),gy,gx;
-  /* soft corduroy dashes on the pack — unique phase per strip so motion is visible */
-  cx.strokeStyle='rgba(120,150,175,.28)';cx.lineWidth=1.2;
-  for(i=Math.floor((cam-40)/48)-1;i<=Math.ceil((cam+W+40)/48)+1;i++){
-    wx=i*48+((Math.abs(i)*17)%11);sx=wx-cam+rx;
-    if(sx<-20||sx>W+20)continue;
-    gy=gY(sx);
-    cx.beginPath();cx.moveTo(sx-6,gy+10);cx.lineTo(sx+10,gy+18);cx.stroke();
-    if(i%2===0){cx.beginPath();cx.moveTo(sx-4,gy+16);cx.lineTo(sx+12,gy+24);cx.stroke();}
-  }
-  /* snow ovals / drifts downhill of the run */
-  for(i=Math.floor((cam-80)/120)-1;i<=Math.ceil((cam+W+80)/120)+1;i++){
-    wx=i*120+((Math.abs(i)*37)%50);sx=wx-cam+rx;
-    if(sx<-60||sx>W+60)continue;
-    y=downhillPlantY(wx,sx,0.4+0.1*(Math.abs(i)%3));
-    drawDrift(sx,y,48+((Math.abs(i)*13)%40));
-  }
-  /* a few uphill snow patches so tree/decal band has moving texture */
-  cx.fillStyle='rgba(255,255,255,.55)';
-  for(i=Math.floor((cam-80)/95)-1;i<=Math.ceil((cam+W+80)/95)+1;i++){
-    if(hash01(i*8)<0.35)continue;
-    wx=i*95+((Math.abs(i)*41)%30)+20;sx=wx-cam+rx;
-    if(sx<-40||sx>W+40)continue;
-    y=uphillPlantY(wx,sx,0.2+hash01(i)*0.25);
-    if(playLaneClear(sx,y))continue;
-    cx.beginPath();cx.ellipse(sx,y,18+hash01(i*3)*14,5+hash01(i*5)*3,0,0,7);cx.fill();
+  var sky=(curLevel().sky)||THEME.sky;
+  var g=cx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,sky[0]);g.addColorStop(0.55,sky[1]);g.addColorStop(1,sky[2]);
+  cx.fillStyle=g;cx.fillRect(0,0,W,H);
+  /* soft sun only on bright day themes — skipped while backdrop covers */
+  if(!ART.bg[curLevel().bg]&&levelIdx===0){
+    var sx=W*0.78,sy=50-OY*0.08;
+    cx.fillStyle='rgba(255,236,180,.55)';cx.beginPath();cx.arc(sx,sy,22,0,7);cx.fill();
+    cx.fillStyle='#fff6d8';cx.beginPath();cx.arc(sx,sy,11,0,7);cx.fill();
   }
 }
 function drawBackdrop(dist){
-  var look=levelLook();
-  drawResortFar(dist,look);
-  /* NO mid parallax band — all resort props are 1.0x on terrain */
-  if(S){
-    drawWorldUphillFace(look);
-    drawWorldLake(look);
-    drawWorldForest(look);
-    drawWorldLift(look);
-    drawWorldProps(look);
+  var file=curLevel().bg,img=ART.bg[file];
+  if(!img){
+    /* plain sky already drawn — optional soft ridge while waiting */
+    cx.fillStyle='rgba(74,106,136,.35)';cx.beginPath();cx.moveTo(-20,GROUND+90);
+    for(var i=0;i<=8;i++)cx.lineTo(i*(W/8),GROUND-10-Math.abs(Math.sin(i*0.9+(dist*0.001)))*36);
+    cx.lineTo(W+20,GROUND+90);cx.closePath();cx.fill();
+    return;
   }
-  var fogC=look.zone==='bowl'?[210,208,222]:(look.fog||[236,244,250]);
-  var fogTop=GROUND-48,fogBot=GROUND+24;
-  var fog=cx.createLinearGradient(0,fogTop,0,fogBot);
-  fog.addColorStop(0,rgba(fogC,0));fog.addColorStop(0.5,rgba(fogC,0.18));
-  fog.addColorStop(1,rgba(hexRgb(look.snow||'#eef3f8'),0.24));
-  cx.fillStyle=fog;cx.fillRect(-30,fogTop,W+60,fogBot-fogTop);
+  /* Cover height without distortion; bottom-anchored; tile X. Use natural image size (bluebird may be lightly downscaled). */
+  var srcW=img.naturalWidth||img.width||780,srcH=img.naturalHeight||img.height||520;
+  var viewTop=-OY,viewBot=-OY+H;
+  var sc=H/srcH;
+  var dw=srcW*sc,dh=srcH*sc;
+  var yBot=GROUND+Math.min(120,H*0.18);
+  var y=yBot-dh;
+  if(y>viewTop)y=viewTop;
+  if(y+dh<viewBot)y=viewBot-dh;
+  var off=(dist*0.045)%dw,x;
+  for(x=-off-dw;x<W+dw;x+=dw)cx.drawImage(img,0,0,srcW,srcH,x,y,dw,dh);
 }
 function drawNearSnow(){
-  /* underpaint from the run down — kills body-bg navy wedges at the edges */
-  var look=levelLook(),bot=-OY+H+8,top=GROUND+8;
-  var sn=hexRgb(look.snow||'#eef3f8'),fog=look.zone==='bowl'?[200,202,220]:(look.fog||[200,216,230]);
+  /* Soft vertical fill only — no groomer strokes, no ovals (Ted: no notebook lines) */
+  var bot=-OY+H;
+  var top=Math.max(GROUND+70,bot-H*(isLand()?0.22:0.28));
   var g=cx.createLinearGradient(0,top,0,bot);
-  g.addColorStop(0,rgba(sn,0.0));
-  if(look.zone==='bowl'){
-    g.addColorStop(0.25,rgba(sn,0.35));g.addColorStop(0.45,'rgba(255,210,180,.08)');
-    g.addColorStop(0.7,rgba(fog,0.72));g.addColorStop(1,rgba(fog,0.96));
-  }else{
-    g.addColorStop(0.28,rgba(sn,0.4));g.addColorStop(0.6,rgba(fog,0.7));g.addColorStop(1,rgba(fog,0.96));
-  }
-  cx.fillStyle=g;cx.fillRect(-60,top,W+120,bot-top+8);
+  g.addColorStop(0,'rgba(217,230,240,0)');
+  g.addColorStop(0.35,'rgba(200,216,230,.5)');
+  g.addColorStop(1,'rgba(176,196,214,.95)');
+  cx.fillStyle=g;cx.fillRect(-40,top,W+80,bot-top+4);
 }
 function worldBottom(){return Math.max(-OY+H+20,GROUND+240);}
-function drawSlopePack(){
-  /* Run snow only — no scrolling groove stripes / sparkle (eye-trick motion) */
-  var look=levelLook(),gx,gy;
-  cx.beginPath();cx.moveTo(-40,worldBottom());
-  for(gx=-40;gx<=W+40;gx+=8)cx.lineTo(gx,gY(gx));
-  cx.lineTo(W+40,worldBottom());cx.closePath();
-  var sg=cx.createLinearGradient(0,GROUND-80,0,GROUND+160);
-  sg.addColorStop(0,look.snow);sg.addColorStop(0.55,look.tint);sg.addColorStop(1,look.shade);
-  cx.fillStyle=sg;cx.fill();
-  cx.beginPath();
-  for(gx=-40;gx<=W+40;gx+=10){gy=gY(gx);if(gx===-40)cx.moveTo(gx,gy);else cx.lineTo(gx,gy);}
-  for(gx=W+40;gx>=-40;gx-=10)cx.lineTo(gx,gY(gx)+14);
-  cx.closePath();cx.fillStyle='rgba(40,70,100,.11)';cx.fill();
-  cx.strokeStyle=look.shade;cx.lineWidth=2;cx.beginPath();
-  for(gx=-40;gx<=W+40;gx+=8){gy=gY(gx);if(gx===-40)cx.moveTo(gx,gy);else cx.lineTo(gx,gy);}cx.stroke();
-}
-function drawParticles(){
-  var look=levelLook(),n=look.flakes|0,pt=look.pt||'fine',si,fx,fy;
-  for(si=0;si<n;si++){
-    fx=((si*113+(S.dist*0.12))%(W+24))-12;
-    fy=((si*71+S.t*(pt==='ember'?35:pt==='big'?42:55))%(H+40))-OY-20;
-    if(pt==='big'){cx.fillStyle='rgba(255,255,255,.5)';cx.beginPath();cx.arc(fx,fy,2.4,0,7);cx.fill();}
-    else if(pt==='glint'){cx.fillStyle='rgba(200,240,255,.7)';cx.fillRect(fx,fy,2,2);}
-    else if(pt==='ember'){cx.fillStyle=si%3?('rgba(255,'+(140+si%80)+',80,.55)'):'rgba(255,220,160,.4)';cx.fillRect(fx,fy,2,2);}
-    else{cx.fillStyle='rgba(255,255,255,.42)';cx.fillRect(fx,fy,1.6,1.6);}
-  }
-}
 function draw(){
   cx.setTransform(scale,0,0,scale,0,0);
   drawSky();
   cx.save();cx.translate(0,OY);
   drawBackdrop(S?S.dist:0);
-  drawSlopePack();
+  /* snow pack (play lane) */
+  cx.beginPath();cx.moveTo(-40,worldBottom());
+  for(var gx=-40;gx<=W+40;gx+=8)cx.lineTo(gx,gY(gx));
+  cx.lineTo(W+40,worldBottom());cx.closePath();
+  cx.fillStyle=THEME.snow;cx.fill();
+  cx.strokeStyle='#9eb6cc';cx.lineWidth=2;cx.beginPath();
+  for(gx=-40;gx<=W+40;gx+=8){var gy=gY(gx);if(gx===-40)cx.moveTo(gx,gy);else cx.lineTo(gx,gy);}cx.stroke();
+  /* no ruled corduroy / drift ovals — near band is soft gradient only */
   drawNearSnow();
-  if(S){drawSlopeDressing();drawWorldPines();drawJumpTicks();drawParticles();}
+  if(S){
+    /* at most 1–2 full-detail atlas pines per screen */
+    var midL=rideX()-80,midR=Math.min(W-30,rideX()+W*0.5);
+    var shown=0;
+    for(var ti=0;ti<6&&shown<2;ti++){
+      var nx=((ti*620+40)-(S.dist*0.95)%3720);
+      if(nx<-60||nx>W+60)continue;
+      if(nx>midL&&nx<midR)continue;
+      drawPine(nx,gY(nx)+8,shown===0?'tall':'small');
+      shown++;
+    }
+    /* live vertical snowfall on top of backdrop (storm has faint baked flakes too) */
+    for(var si=0;si<18;si++){
+      var fx=((si*113+(S.dist*0.12))%(W+20))-10;
+      var fy=((si*71+S.t*55)%(H+40))-OY-20;
+      cx.fillStyle='rgba(255,255,255,.4)';cx.fillRect(fx,fy,2,2);
+    }
+  }
 
   if(!S){cx.restore();return;}
   var p=S.p;
-  /* Carve trail removed — orange stroke looked like a debug hook under the board */
+  // carve trail
+  cx.lineCap='round';
+  for(var tr=1;tr<S.trail.length;tr++){
+    var a=S.trail[tr-1],b=S.trail[tr];
+    cx.globalAlpha=Math.max(0,b.l*1.6);cx.strokeStyle=THEME.accent;cx.lineWidth=2.4;
+    cx.beginPath();cx.moveTo(a.x,a.y);cx.lineTo(b.x,b.y);cx.stroke();
+  }
+  cx.globalAlpha=1;
+  /* no horizontal speed streaks — snow only falls vertically */
 
   S.obs.forEach(function(o){
     var ox=o.x-S.dist+p.x;if(ox<-140||ox>W+140)return;
@@ -1499,36 +794,29 @@ function draw(){
   if(!p.on&&S.mode==='play'){var airRot=(S.flip||0)+(S.spinDeg||0)*Math.PI/180;if(airRot)cx.rotate(airRot);}
   if(S.landT>0)cx.scale(1+0.05*S.landT,1-0.08*S.landT);paintRider(poseFor(),S.t);cx.restore();
   S.parts.forEach(function(q){cx.globalAlpha=Math.max(0,q.l*2);cx.fillStyle=q.c;cx.fillRect(q.x,q.y,3.5,3.5);});cx.globalAlpha=1;
-  /* pulse flash removed — beat vignette read as eye-trick motion */
+  if(S.pulse>0){cx.fillStyle='rgba(232,119,46,'+(S.pulse*0.07)+')';cx.fillRect(-30,-OY,W+60,90);}
   if(S.flash<0){cx.fillStyle='rgba(180,220,255,'+(-S.flash)+')';cx.fillRect(-30,-OY,W+60,H);}
 
-  // HUD — soft ellipse vignette (zero alpha well inside fill; no rect)
+  // HUD — no plate/scrim box; readable via stroke + soft shadow only
   var hy=-OY+(OY>12?32:0),barY=82+hy;
   if(!menuOpen()){
-    var barX=12,barW=Math.min(230,W*0.55),prog=Math.min(1,S.dist/curLen());
-    var scx=14,scy=hy+20,srx=Math.min(W*1.2,560),sry=barY-hy+160;
-    cx.save();cx.translate(scx,scy);cx.scale(1,sry/srx);
-    var scrim=cx.createRadialGradient(0,0,0,0,0,srx*0.88);
-    scrim.addColorStop(0,'rgba(8,16,30,.42)');scrim.addColorStop(0.25,'rgba(8,16,30,.2)');
-    scrim.addColorStop(0.5,'rgba(8,16,30,.07)');scrim.addColorStop(0.75,'rgba(8,16,30,.015)');
-    scrim.addColorStop(1,'rgba(8,16,30,0)');
-    cx.fillStyle=scrim;cx.beginPath();cx.arc(0,0,srx,0,7);cx.fill();
-    cx.restore();
+    var barX=12,barW=Math.min(230,W*0.55),prog=Math.min(1,S.dist/L1_LEN);
     function hudText(txt,x,y,font,col){
       cx.font=font;cx.lineJoin='round';cx.miterLimit=2;
-      cx.strokeStyle='rgba(4,10,20,.65)';cx.lineWidth=3.2;cx.strokeText(txt,x,y);
-      cx.strokeStyle='rgba(4,10,20,.25)';cx.lineWidth=5.5;cx.strokeText(txt,x,y);
+      /* soft glow only — no plate, no hard stroke box */
+      cx.shadowColor='rgba(0,0,0,.85)';cx.shadowBlur=12;cx.shadowOffsetX=0;cx.shadowOffsetY=1;
+      cx.strokeStyle='rgba(4,10,20,.55)';cx.lineWidth=2.5;cx.strokeText(txt,x,y);
       cx.fillStyle=col;cx.fillText(txt,x,y);
+      cx.shadowBlur=0;cx.shadowColor='transparent';
     }
     cx.textAlign='left';
     hudText('Score '+score(),12,26+hy,'800 24px system-ui,sans-serif','#fff');
     hudText('♥ '+lives+'  ·  Attempt '+Math.max(1,attempts+(S.mode==='play'||S.mode==='over'?1:0)),12,48+hy,'800 13px system-ui,sans-serif','#e8f2ff');
     hudText(curLevel().id+' '+curLevel().name,12,70+hy,'800 16px system-ui,sans-serif','#fff');
-    /* soft track under fill — readable on pale snow, not a hard box */
-    cx.fillStyle='rgba(8,16,28,.45)';rr(barX,barY,barW,11,5);cx.fill();
-    cx.fillStyle='rgba(255,255,255,.62)';rr(barX,barY,barW,11,5);cx.fill();
-    cx.fillStyle='#2bd17e';rr(barX,barY,Math.max(6,barW*prog),11,5);cx.fill();
-    hudText(Math.floor(prog*100)+'%',barX+barW+8,barY+10,'800 12px system-ui,sans-serif','#fff');
+    /* soft progress track (rounded via path) — not a HUD plate */
+    cx.fillStyle='rgba(0,0,0,.35)';rr(barX,barY,barW,12,6);cx.fill();
+    cx.fillStyle='#2bd17e';rr(barX,barY,Math.max(6,barW*prog),12,6);cx.fill();
+    hudText(Math.floor(prog*100)+'%',barX+barW+8,barY+11,'800 13px system-ui,sans-serif','#fff');
   }
   if(S.mode==='play'&&S.pop){
     var qx=Math.min(W-40,p.x+86),qy=Math.max(barY+26,Math.min(p.y-78,barY+50));
@@ -1539,43 +827,25 @@ function draw(){
     var title=S.mode==='ready'?'TAP JUMP':(S.mode==='pause'?'PAUSED':'CLEAR '+score());
     cx.fillStyle='rgba(8,16,32,.86)';rr(W/2-145,42,290,S.mode==='clear'?112:90,14);cx.fill();cx.strokeStyle='#ffd84a66';cx.lineWidth=2;cx.stroke();
     cx.fillStyle='#fff';cx.font='800 26px system-ui,sans-serif';cx.textAlign='center';cx.fillText(title,W/2,82);
-    cx.font='700 14px system-ui,sans-serif';cx.fillStyle='#9fd3ff';cx.fillText(S.mode==='clear'?'Best '+pb+' · Attempt '+attempts:'Tap JUMP · hold in air to flip · air taps spin',W/2,110);cx.textAlign='left';
+    cx.font='700 14px system-ui,sans-serif';cx.fillStyle='#9fd3ff';cx.fillText(S.mode==='clear'?'Best '+pb+' · Attempt '+attempts:'Hold JUMP for height · carve the line',W/2,110);cx.textAlign='left';
   }
   if(S.mode==='over'){
     cx.fillStyle='rgba(8,16,32,.9)';rr(W/2-135,36,270,100,14);cx.fill();cx.strokeStyle='#e8772e88';cx.stroke();
     cx.fillStyle='#fff';cx.font='800 24px system-ui,sans-serif';cx.textAlign='center';cx.fillText('WIPEOUT',W/2,74);
     cx.font='700 14px system-ui,sans-serif';cx.fillStyle='#ffd84a';cx.fillText((S.fail||'')+' · retrying…',W/2,100);cx.textAlign='left';
   }
-  /* Level title in upper sky (~30% viewport) — glow text only, no panel */
-  if(!menuOpen()&&S.titleT>0&&(S.mode==='play'||S.mode==='ready')){
-    var a=S.titleT<0.4?S.titleT/0.4:1, ty=-OY+H*0.30;
-    cx.save();cx.globalAlpha=a;cx.textAlign='center';cx.lineJoin='round';
-    cx.font='900 22px system-ui,sans-serif';
-    cx.shadowColor='rgba(8,20,40,.9)';cx.shadowBlur=18;cx.shadowOffsetY=2;
-    cx.strokeStyle='rgba(4,12,24,.45)';cx.lineWidth=4;
-    cx.strokeText(curLevel().id+'  '+curLevel().name,W/2,ty);
-    cx.fillStyle='#fff';cx.fillText(curLevel().id+'  '+curLevel().name,W/2,ty);
-    cx.font='700 13px system-ui,sans-serif';
-    cx.strokeText(curLevel().tag||'',W/2,ty+22);
-    cx.fillStyle='#d6ecff';cx.fillText(curLevel().tag||'',W/2,ty+22);
-    cx.restore();
-  }
   cx.restore();
 }
 
 function resize(){
   dpr=window.devicePixelRatio||1;cv.width=innerWidth*dpr;cv.height=innerHeight*dpr;
-  /* Ensure ≥LOOK_AHEAD_S of world visible ahead of the 22% rider seat */
+  /* Landscape: look-ahead; portrait: frame run lower so belly isn't empty white */
   var landGuess=innerWidth>innerHeight*1.15;
-  var minAhead=SPD*LOOK_AHEAD_S;
-  var minW=Math.ceil(minAhead/0.78+24);
-  scale=Math.min(cv.height/(GROUND+(landGuess?210:150)),cv.width/Math.max(landGuess?460:340,minW));
+  scale=Math.min(cv.height/(GROUND+(landGuess?210:150)),cv.width/(landGuess?460:340));
   W=cv.width/scale;H=cv.height/scale;
-  if(W*0.78<minAhead){W=minAhead/0.78;scale=cv.width/W;H=cv.height/scale;}
   var land=isLand();
-  OY=H*(land?0.56:0.70)-GROUND;
+  OY=H*(land?0.56:0.66)-GROUND; /* steady cam — portrait sits lower */
   if(land){if(OY<18)OY=18;}else if(OY<48)OY=48;
-  CAM_Y=GROUND;
   if(S&&S.p){S.p.x=rideX();if(S.p.on)S.p.y=gY(S.p.x);}
 }
 function syncUI(){
@@ -1588,50 +858,14 @@ function openMenu(){
   var el=document.getElementById('menu');el.style.display='block';
   var lv=curLevel();
   if(menuSheet==='how'){
-    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>JUMP — full arc every tap · hold in air to backflip · air taps spin up to 720</li><li>Five lives — wipeout retries instantly (practice feel)</li><li>Beat-timed boulder patterns — each level has its own rhythm + look</li><li>Clear levels / stars to unlock boards and rider looks</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
+    el.innerHTML='<div class="sheet"><h2>How to play</h2><ul><li>JUMP — tap to clear boulders · hold in air to backflip · air taps spin</li><li>Five lives — hit a rock or grom and lose one</li><li>Groms: sit (L1) or ride (L2+) — jump/clear for CLOSE!</li><li>Plain jumps always land clean — only a real under-rotated flip/spin or a hit crashes</li></ul><button type="button" class="back" id="sheetBack">Back</button></div>';
   }else if(menuSheet==='levels'){
-    var rows=LEVELS.map(function(L,i){
-      var lock=i>unlocks.cleared&&i>0?' (locked)':'';
-      return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+lock+'</b> — '+L.tag+'</p>';
-    }).join('');
-    el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same resort — different zones, each with its own painted look.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
-  }else if(menuSheet==='gear'){
-    var boards=BOARDS.map(function(b){
-      var on=boardUnlocked(b),eq=unlocks.board===b.id;
-      return '<button type="button" data-board="'+b.id+'" class="'+(eq?'eq ':'')+(on?'':'lock')+'"><div class="deck" style="background:linear-gradient(180deg,'+b.deck+','+b.deck+');box-shadow:inset 0 -3px 0 '+b.stripe+',0 3px 0 rgba(0,0,0,.35)"></div><span class="nm">'+b.name+'</span>'+(on?'':'<span class="need">Clear L'+b.needLvl+'</span>')+'</button>';
-    }).join('');
-    var looks=LOOKS.map(function(lk){
-      var on=lookUnlocked(lk),eq=unlocks.look===lk.id;
-      var need=lk.needStars!=null?('Earn '+lk.needStars+' stars'):('Clear L'+lk.needLvl);
-      return '<button type="button" data-look="'+lk.id+'" class="'+(eq?'eq ':'')+(on?'':'lock')+'"><div class="sw" style="background:'+lk.jacket+'"></div><span class="nm">'+lk.name+'</span>'+(on?'':'<span class="need">'+need+'</span>')+'</button>';
-    }).join('');
-    el.innerHTML='<div class="locker"><h2>Locker</h2><p class="meta">Stars '+unlocks.stars+' · Cleared '+unlocks.cleared+'</p><div class="stage"><canvas id="lockerCv" width="210" height="160"></canvas></div><div class="sec">Boards</div><div class="rack">'+boards+'</div><div class="sec">Looks</div><div class="looks">'+looks+'</div><button type="button" class="back" id="sheetBack">Back</button></div>';
+    var rows=LEVELS.map(function(L,i){return '<p'+(i===levelIdx?' style="color:#ffd84a"':'')+'><b>'+L.id+' '+L.name+'</b> — resort backdrop</p>';}).join('');
+    el.innerHTML='<div class="sheet"><h2>Levels</h2>'+rows+'<p style="opacity:.75">Same chart; one backdrop per level.</p><button type="button" class="back" id="sheetBack">Back</button></div>';
   }else{
-    el.innerHTML='<div class="wrap"><h1>BOULDER DODGE</h1><div class="hi">HIGH SCORE · '+pb+' · ★ '+unlocks.stars+'</div><button type="button" class="playBig" id="playGo">PLAY</button><div class="lvl">'+lv.id+' · '+lv.name+'</div><div class="sheetNav"><button type="button" data-sheet="how"><span class="ic">?</span>How</button><button type="button" data-sheet="levels"><span class="ic">L</span>Levels</button><button type="button" data-sheet="gear"><span class="ic">B</span>Gear</button></div><p class="tag">v'+VER+' · build '+BUILD_ID+'</p></div>';
+    el.innerHTML='<div class="wrap"><h1>BOULDER DODGE</h1><div class="hi">HIGH SCORE · '+pb+'</div><button type="button" class="playBig" id="playGo">PLAY</button><div class="lvl">'+lv.id+' · '+lv.name+'</div><div class="sheetNav"><button type="button" data-sheet="how"><span class="ic">?</span>How</button><button type="button" data-sheet="levels"><span class="ic">L</span>Levels</button></div><p class="tag">Offline · v'+VER+'</p></div>';
   }
   if(S&&S.mode==='play'){S.mode='pause';stopMusic();}
-  Array.prototype.forEach.call(el.querySelectorAll('[data-board]'),function(btn){
-    btn.onclick=function(){
-      var id=btn.getAttribute('data-board'),b=BOARDS.find(function(x){return x.id===id;});
-      if(b&&boardUnlocked(b)){unlocks.board=b.id;saveUnlocks();applyEquippedKit();openMenu();}
-    };
-  });
-  Array.prototype.forEach.call(el.querySelectorAll('[data-look]'),function(btn){
-    btn.onclick=function(){
-      var id=btn.getAttribute('data-look'),lk=LOOKS.find(function(x){return x.id===id;});
-      if(lk&&lookUnlocked(lk)){unlocks.look=lk.id;saveUnlocks();applyEquippedKit();openMenu();}
-    };
-  });
-  if(menuSheet==='gear')paintLockerPreview();
-}
-function paintLockerPreview(){
-  var c=document.getElementById('lockerCv');if(!c)return;
-  var g=c.getContext('2d'),prev=cx;cx=g;
-  g.clearRect(0,0,210,160);
-  applyEquippedKit();
-  g.save();g.translate(105,138);g.scale(1.35,1.35);
-  paintRider({profile:1,cutout:1,lean:0.15,knee:0.55,arch:0.08,boardRot:0.04,frontArm:0.4,backArm:-0.5,armLift:0.2},0);
-  g.restore();cx=prev;
 }
 function closeMenu(){document.getElementById('menu').style.display='none';menuSheet=null;if(S&&S.mode==='pause'){S.mode='play';startMusic();}}
 function frame(ts){
@@ -1701,67 +935,26 @@ window.BoulderDodge={
   _test:{
     state:function(){return S;},step:step,jump:jump,spinTap:spinTap,beginPress:beginPress,canvasRelease:canvasRelease,
     holdSet:holdSet,draw:draw,reset:reset,crash:crash,buildObs:buildObs,gromSize:gromSize,fairGap:fairGap,setSeed:setSeed,
-    setLevel:setLevel,curLevel:curLevel,LEVELS:LEVELS,ensureBackdrop:ensureBackdrop,gY:gY,slopeAt:slopeAt,terr:terr,pineBlocked:pineBlocked,drawWorldPines:drawWorldPines,poseFor:poseFor,paintRider:paintRider,paintRiderCutout:paintRiderCutout,riderProfileMetrics:riderProfileMetrics,measureRigPixels:measureRigPixels,rigLayout:rigLayout,cutoutSc:cutoutSc,RIG_PARTS:RIG_PARTS,getRigDrawCounts:function(){return RIG_DRAW_COUNTS;},getRigMeta:function(){return ART.rigMeta;},
-    setLevelPlate:function(i,bg,sky){var lv=LEVELS[((i|0)%LEVELS.length+LEVELS.length)%LEVELS.length];if(sky)lv.sky=sky;},
+    setLevel:setLevel,curLevel:curLevel,ensureBackdrop:ensureBackdrop,gY:gY,slopeAt:slopeAt,
     clearSpin:clearSpin,clearFlip:clearFlip,clearTricks:clearTricks,
     spinLandingClean:spinLandingClean,flipLandingClean:flipLandingClean,spinTier:spinTier,landFromAir:landFromAir,
     getLives:function(){return lives;},setLives:function(n){lives=Math.max(0,Math.min(LIVES_MAX,n|0));},
     consts:{DT:DT,SPD:SPD,L1_LEN:L1_LEN,RIDER_H_FRAC:RIDER_H_FRAC,RIDER_LOCAL_H:RIDER_LOCAL_H,JV:JV,G:G,
       SPIN_HALF:SPIN_HALF,SPIN_MAX:SPIN_MAX,SPIN_TOL:SPIN_TOL,SPIN_LIFT:SPIN_LIFT,SPIN_RATE:SPIN_RATE,SPIN_PTS:SPIN_PTS,
-      TAP_MS:TAP_MS,FLIP_RATE:FLIP_RATE,FLIP_TOL:FLIP_TOL,FLIP_CRASH_MIN:FLIP_CRASH_MIN,APEX_HUD_PAD:APEX_HUD_PAD,
-      ROCK_HIT:ROCK_HIT,ROCK_BURY:ROCK_BURY,BEAT:BEAT,BPM:BPM,
+      TAP_MS:TAP_MS,FLIP_RATE:FLIP_RATE,FLIP_TOL:FLIP_TOL,FLIP_CRASH_MIN:FLIP_CRASH_MIN,APEX_TOP_FRAC:APEX_TOP_FRAC,
+      ROCK_HIT:ROCK_HIT,ROCK_BURY:ROCK_BURY,
       LIVES_MAX:LIVES_MAX,GROM_SPD_FRAC:GROM_SPD_FRAC,GROM_HIT:GROM_HIT,GROM_CLEAR_PTS:GROM_CLEAR_PTS,GROM_PAD_T:GROM_PAD_T},
-    apexFloorY:apexFloorY,clampApex:clampApex,curLen:curLen,curChart:curChart,levelLook:levelLook,
-    getRockPaint:function(){return ROCK_PAINT;},
-    setRockPaint:function(n){ROCK_PAINT=Math.max(1,Math.min(3,n|0));},
-    getResortStyle:function(){return RESORT_STYLE;},
-    setResortStyle:function(n){RESORT_STYLE=Math.max(1,Math.min(3,n|0));},
-    getUnlocks:function(){return unlocks;},
-    setUnlocks:function(u){unlocks=Object.assign(unlocks,u||{});saveUnlocks();applyEquippedKit();},
-    BOARDS:BOARDS,LOOKS:LOOKS,curBoard:curBoard,curLook:curLook,
-    /* Assert full apex + clean landing for N consecutive jumps on current level (no rocks). */
-    runJumpArcTest:function(n){
-      n=n||20;
-      var expected=(JV*JV)/(2*G),out=[],i,ok=true;
-      var prevMode=S.mode,prevObs=S.obs;
-      S.mode='play';S.obs=[];S.fail='';lives=LIVES_MAX;
-      for(i=0;i<n;i++){
-        var k;
-        for(k=0;k<24;k++)step(DT);
-        if(!S.p.on){while(!S.p.on)step(DT);}
-        var takeoffGy=gY(S.p.x);
-        beginPress(); /* hold through apex — release never cuts height anyway */
-        var minY=S.p.y,frames=0,floorHit=false,landed=false;
-        while(frames++<700){
-          step(DT);
-          if(S.p.y<minY)minY=S.p.y;
-          if(S.p.y<=apexFloorY()+0.5)floorHit=true;
-          if(S.mode==='over')break;
-          if(S.p.on&&frames>4){landed=true;break;}
-        }
-        canvasRelease();
-        for(k=0;k<8;k++)step(DT);
-        var height=takeoffGy-minY,ratio=height/expected;
-        var pass=landed&&!floorHit&&S.mode==='play'&&ratio>=0.92&&height>=expected*0.92;
-        if(!pass)ok=false;
-        out.push({n:i+1,height:+height.toFixed(2),expected:+expected.toFixed(2),ratio:+ratio.toFixed(3),
-          apexFloorHit:floorHit,landed:landed,fail:S.fail||'',pass:pass});
-        if(S.mode==='over'){S.mode='play';S.fail='';S.p.on=true;S.p.y=gY(S.p.x);S.p.vy=0;}
-      }
-      S.obs=prevObs;S.mode=prevMode;
-      return{ok:ok,expected:expected,jumps:out,level:curLevel().id,apexFloorY:apexFloorY()};
-    },
+    apexFloorY:apexFloorY,clampApex:clampApex,
     measureRider:function(){
-      var playCss=innerHeight,riderCss=targetRiderCss();
+      var playCss=innerHeight,riderCss=RIDER_H_FRAC*playCss;
       return{
         riderHFrac:RIDER_H_FRAC,
         riderLocalH:RIDER_LOCAL_H,
         riderSc:riderSc(),
         artSc:artSc(),
         artOk:!!ART.ok,
-        bgOk:true,
-        bgFile:'procedural-resort',
-        resortStyle:RESORT_STYLE,
+        bgOk:!!ART.bg[curLevel().bg],
+        bgFile:curLevel().bg,
         level:curLevel().id,
         worldRiderH:worldRiderH(),
         playfieldGameH:H,
@@ -1770,198 +963,6 @@ window.BoulderDodge={
         riderPxOverPlayfieldPx:riderCss/playCss,
         orientation:isLand()?'landscape':'portrait'
       };
-    },
-    /* All non-ridge trees/landmarks: world 1.0x. Δsx = −Δdist (±0.5). */
-    listNearTrees:function(){
-      var out=[];
-      iterWorldLandmarks(function(t){
-        if(t.kind!=='tree')return;
-        if(t.sx<-40||t.sx>W+40)return;
-        out.push({wx:t.wx,sx:t.sx,sy:t.sy,band:t.band,yRel:t.sy-slopePlantY(t.wx,t.sx),dist:S.dist,kind:t.kind});
-      });
-      return out;
-    },
-    listWorldLandmarks:function(){
-      var out=[];
-      iterWorldLandmarks(function(t){
-        if(t.sx<-80||t.sx>W+80)return;
-        out.push({wx:t.wx,sx:t.sx,sy:t.sy,band:t.band,kind:t.kind,dist:S.dist});
-      });
-      return out;
-    },
-    runTreeAnchorTest:function(){
-      return this.runParallaxRateTest();
-    },
-    runParallaxRateTest:function(){
-      /* PIXEL harness — world-math-only checks hid the cam+offset tree bug. */
-      return this.runPixelScrollTest();
-    },
-    runPixelScrollTest:function(){
-      /* Render two frames 0.2s of travel apart; optical-flow crops of trees/decals/rocks. */
-      var prevMode=S.mode,prevObs=S.obs,ok=true,detail=[];
-      var dtPair=0.2,need=SPD*dtPair,tol=0.12;
-      var bestLag;
-      function xcorrShift(pa,pb,expectPx){
-        /* Prefer the peak nearest the expected scroll to avoid periodic-texture aliases. */
-        var n=pa.length,lag,best=-1e99,c,k,i,meanA=0,meanB=0,aa=[],bb=[],peaks=[],p;
-        if(n<8)return 0;
-        for(i=0;i<n;i++){meanA+=pa[i];meanB+=pb[i];}
-        meanA/=n;meanB/=n;
-        for(i=0;i<n;i++){aa.push(pa[i]-meanA);bb.push(pb[i]-meanB);}
-        bestLag=0;
-        for(lag=-(n-1);lag<=n-1;lag++){
-          c=0;for(i=0;i<n;i++){k=i+lag;if(k<0||k>=n)continue;c+=aa[i]*bb[k];}
-          peaks.push({lag:lag,c:c});
-          if(c>best){best=c;bestLag=lag;}
-        }
-        if(expectPx!=null&&isFinite(expectPx)){
-          var win=null,thr=best*0.72;
-          for(i=0;i<peaks.length;i++){
-            p=peaks[i];if(p.c<thr)continue;
-            if(Math.abs(p.lag-expectPx)>Math.max(24,Math.abs(expectPx)*0.35))continue;
-            if(!win||p.c>win.c)win=p;
-          }
-          if(win)bestLag=win.lag;
-        }
-        return bestLag;
-      }
-      function grayRow(img,x0,y0,w,h){
-        /* average each column to a 1D profile */
-        var d=img.data,p=[],x,y,i,s,n,ww=img.width;
-        for(x=0;x<w;x++){
-          s=0;n=0;
-          for(y=0;y<h;y++){
-            i=((y0+y)*ww+(x0+x))<<2;
-            s+=d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11;n++;
-          }
-          p.push(s/Math.max(1,n));
-        }
-        return p;
-      }
-      function grab(){
-        draw();
-        return cx.getImageData(0,0,cv.width,cv.height);
-      }
-      this.setLevel(0);this.reset(true);this.setLives(LIVES_MAX);
-      S.mode='play';S.obs=buildObs();S.fail='';S.noAutoRetry=1;S.cleared=0;
-      /* seed so a rock is ahead and trees fill the band */
-      var guard=0;
-      while(S.dist<380&&S.mode==='play'&&guard++<8000)step(DT);
-      if(S.mode!=='play'){S.mode='play';S.fail='';S.p.on=true;S.p.y=gY(S.p.x);S.p.vy=0;}
-      var a=grab(),d0=S.dist;
-      guard=0;
-      while(S.dist<d0+need&&guard++<5000){
-        if(S.mode!=='play'){S.mode='play';S.fail='';S.p.on=true;S.p.y=gY(S.p.x);S.p.vy=0;}
-        step(DT);
-      }
-      var b=grab();
-      /* logical → device: draw uses setTransform(scale) then translate(0,OY) */
-      var sc=scale||1;
-      function crop(img,lx,ly,lw,lh){
-        var x0=Math.max(0,Math.round(lx*sc));
-        var y0=Math.max(0,Math.round((ly+OY)*sc));
-        var w=Math.max(8,Math.round(lw*sc));
-        var h=Math.max(8,Math.round(lh*sc));
-        if(x0+w>img.width)w=img.width-x0;
-        if(y0+h>img.height)h=img.height-y0;
-        return grayRow(img,x0,y0,w,h);
-      }
-      var rx=rideX(),run=GROUND;
-      /* Mid uphill band only — skip far-ridge (static) and the run pack. */
-      var faceSpan=run-faceTop(),treeTop=faceTop()+faceSpan*0.28,treeH=Math.max(90,faceSpan*0.52);
-      /* content moves left as dist↑ → lag ≈ ±need*sc in device px */
-      var expDev=need*sc;
-      var shiftTree=xcorrShift(crop(a,20,treeTop,W-40,treeH),crop(b,20,treeTop,W-40,treeH),expDev)/sc;
-      var shiftDecal=xcorrShift(crop(a,40,run+6,W-80,55),crop(b,40,run+6,W-80,55),expDev)/sc;
-      var shiftRock=xcorrShift(crop(a,rx+30,run-55,Math.min(280,W-rx-50),70),crop(b,rx+30,run-55,Math.min(280,W-rx-50),70),expDev)/sc;
-      /* compare magnitudes — xcorr sign depends on which frame is reference */
-      function nearAbs(val,ref){
-        return Math.abs(Math.abs(val)-Math.abs(ref))<=Math.max(10,Math.abs(ref)*tol);
-      }
-      if(Math.abs(shiftRock)<need*0.4){ok=false;detail.push({err:'rock_shift_too_small',shiftRock:shiftRock,need:need});}
-      if(Math.abs(shiftTree)<need*0.4){ok=false;detail.push({err:'tree_shift_near_zero',shiftTree:shiftTree,need:need});}
-      if(Math.abs(shiftDecal)<need*0.4){ok=false;detail.push({err:'decal_shift_near_zero',shiftDecal:shiftDecal,need:need});}
-      if(ok&&!nearAbs(shiftTree,shiftRock)){ok=false;detail.push({err:'tree_vs_rock',shiftTree:shiftTree,shiftRock:shiftRock});}
-      if(ok&&!nearAbs(shiftDecal,shiftRock)){ok=false;detail.push({err:'decal_vs_rock',shiftDecal:shiftDecal,shiftRock:shiftRock});}
-      S.obs=prevObs;S.mode=prevMode;S.noAutoRetry=0;
-      return{
-        ok:ok,dt:dtPair,need:need,
-        shiftTree:shiftTree,shiftDecal:shiftDecal,shiftRock:shiftRock,
-        ratioTree:shiftRock?+(shiftTree/shiftRock).toFixed(3):null,
-        ratioDecal:shiftRock?+(shiftDecal/shiftRock).toFixed(3):null,
-        fails:detail,FAR_PAR:FAR_PAR,hasMid:typeof MID_PAR!=='undefined'
-      };
-    },
-    gapHistogram:function(){
-      var out={},li,ch,i,gaps=[],uniq,consec,set,ok;
-      for(li=0;li<LEVELS.length;li++){
-        ch=LEVELS[li].chart;gaps=[];consec=false;set={};
-        for(i=1;i<ch.length;i++){
-          gaps.push(ch[i].x-ch[i-1].x);
-          if(i>1&&gaps[gaps.length-1]===gaps[gaps.length-2])consec=true;
-        }
-        for(i=0;i<gaps.length;i++)set[gaps[i]]=1;
-        uniq=Object.keys(set).length;
-        ok=!consec&&uniq>=5&&Math.min.apply(null,gaps)>=fairGap(40);
-        out[LEVELS[li].id]={gaps:gaps,min:Math.min.apply(null,gaps),max:Math.max.apply(null,gaps),n:gaps.length,minSafe:fairGap(40),distinct:uniq,consecRepeat:consec,ok:ok};
-      }
-      return out;
-    },
-    FAR_PAR:FAR_PAR,GAP_MULS:GAP_MULS,GAP_MULS_WIDE:GAP_MULS_WIDE,rebuildCharts:rebuildCharts,
-    LOOK_AHEAD_S:LOOK_AHEAD_S,BUILD_ID:BUILD_ID,VER:VER,
-    allowedParallax:function(){return{world:1.0,farMax:0.02,far:FAR_PAR,mid:null};},
-    lookAheadOk:function(){
-      var ahead=(W-rideX()),need=SPD*LOOK_AHEAD_S;
-      return{ok:ahead+1>=need,ahead:ahead,need:need,rideX:rideX(),W:W};
-    },
-    runAutoBot:function(maxObs){
-      /* Legacy clear-count helper — survival gate is runSurvivalBot. */
-      var surv=this.runSurvivalBot(25,0);
-      return{ok:surv.cleared>=(maxObs||10)&&surv.lives===LIVES_MAX,cleared:surv.cleared,frames:surv.frames,
-        fail:surv.fail,dist:surv.dist,t:surv.t,lookAhead:this.lookAheadOk(),airT:2*Math.abs(JV)/G,lives:surv.lives,deaths:surv.deaths};
-    },
-    runSurvivalBot:function(seconds,jitter){
-      /* Jump at 0.6s±jitter to contact. No soft-revive — 0 lives ends the run. */
-      seconds=seconds||60;jitter=jitter||0;
-      var prevMode=S.mode,prevObs=S.obs,frames=0,fail=null,i,o,ox,eta,jumpedFor,trigger,nearest,best;
-      var rng=function(n){var x=Math.sin((n+1)*127.1)*43758.5453;return x-Math.floor(x);};
-      this.setLevel(0);this.reset(true);this.setLives(LIVES_MAX);
-      S.mode='play';S.obs=buildObs();S.fail='';S.cleared=0;S.noAutoRetry=1;S.deathLog=[];jumpedFor=null;
-      while(S.t<seconds&&frames<120*(seconds+5)){
-        if(S.mode==='over'){fail=S.fail;break;}
-        nearest=null;best=1e9;
-        for(i=0;i<S.obs.length;i++){
-          o=S.obs[i];
-          if(o.k!=='rock'&&o.k!=='kicker'&&o.k!=='gap'&&o.k!=='coyote'&&o.k!=='grom')continue;
-          if(o.cleared)continue;
-          ox=o.x-S.dist;if(ox<-40)continue;if(ox<best){best=ox;nearest=o;}
-        }
-        if(nearest){
-          eta=(nearest.x-S.dist)/SPD;
-          trigger=0.6+(jitter?(rng(frames)-0.5)*2*jitter:0);
-          if(trigger<0.35)trigger=0.35;if(trigger>0.85)trigger=0.85;
-          if(eta<=trigger&&eta>0.08&&S.p.on&&jumpedFor!==nearest){
-            this.jump();jumpedFor=nearest;S.holding=true;
-          }
-          if(nearest.cleared&&S.p.on){this.canvasRelease();jumpedFor=null;}
-        }else this.canvasRelease();
-        this.step(DT);frames++;
-        if(S.mode==='clear')break;
-      }
-      this.canvasRelease();
-      var out={
-        ok:lives===LIVES_MAX&&S.t>=seconds-0.05&&S.mode!=='over',
-        humanOk:lives>=LIVES_MAX-1&&S.t>=seconds-0.05,
-        lives:lives,deaths:S.deathLog.slice(),deathLog:S.deathLog.slice(),
-        cleared:S.cleared,frames:frames,fail:fail||S.fail||'',dist:S.dist,t:S.t,
-        jitter:jitter,mode:S.mode
-      };
-      S.noAutoRetry=0;S.obs=prevObs;S.mode=prevMode;
-      return out;
-    },
-    runHumanBot:function(seconds){
-      /* ±0.15s timing noise — must lose ≤1 life in 60s */
-      return this.runSurvivalBot(seconds||60,0.15);
     }
   }
 };
@@ -1971,7 +972,10 @@ bootArt();
 requestAnimationFrame(frame);
 try{
   if(navigator.serviceWorker){
-    navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(function(){});
+    navigator.serviceWorker.getRegistrations().then(function(rs){
+      rs.forEach(function(r){if((r.scope||'').indexOf('/arcade/boulder-dodge-rollback')>=0)r.unregister();});
+    });
+    navigator.serviceWorker.register('./sw.js?v=34b87be',{scope:'./'}).catch(function(){});
   }
 }catch(e){}
 })();
